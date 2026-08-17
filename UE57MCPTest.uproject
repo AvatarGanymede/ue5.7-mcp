@@ -1,0 +1,19 @@
+{
+  "FileVersion": 3,
+  "EngineAssociation": "5.7",
+  "Category": "Tests",
+  "Description": "Temporary content-only host used for end-to-end UnrealMCP validation.",
+  "AdditionalPluginDirectories": [
+    "UnrealMCP"
+  ],
+  "Plugins": [
+    {
+      "Name": "UnrealMCP",
+      "Enabled": true
+    },
+    {
+      "Name": "PythonScriptPlugin",
+      "Enabled": true
+    }
+  ]
+}

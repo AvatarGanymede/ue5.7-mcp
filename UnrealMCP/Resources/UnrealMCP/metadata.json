@@ -1,0 +1,121 @@
+{
+  "tool": {
+    "name": "unreal",
+    "title": "Unreal Editor",
+    "description": "Discover and execute Unreal Editor workflows through UE Python/reflection, console commands, ordered batches, transactions, and asynchronous task tracking.",
+    "inputSchema": {
+      "type": "object",
+      "oneOf": [
+        {
+          "properties": {
+            "action": { "const": "discover", "description": "Search capability recipes." },
+            "query": { "type": "string", "description": "Natural-language capability query." },
+            "domain": { "type": "string", "description": "Exact capability-domain id." },
+            "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
+          },
+          "required": ["action"],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "action": { "const": "health", "description": "Check the gateway-to-editor connection." }
+          },
+          "required": ["action"],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "action": { "const": "execute", "description": "Run an ordered command batch." },
+            "commands": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 100,
+              "items": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": { "const": "python" },
+                      "code": { "type": "string", "minLength": 1 },
+                      "mode": { "enum": ["exec", "eval"], "default": "exec" },
+                      "label": { "type": "string" }
+                    },
+                    "required": ["kind", "code"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "kind": { "const": "console" },
+                      "command": { "type": "string", "minLength": 1 },
+                      "label": { "type": "string" }
+                    },
+                    "required": ["kind", "command"],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            },
+            "run": { "enum": ["sync", "async"], "default": "sync" },
+            "transaction": { "type": "boolean", "default": true },
+            "continue_on_error": { "type": "boolean", "default": false },
+            "timeout_ms": { "type": "integer", "minimum": 100, "maximum": 3600000 }
+          },
+          "required": ["action", "commands"],
+          "additionalProperties": false
+        },
+        {
+          "properties": {
+            "action": { "const": "task", "description": "Manage asynchronous batches." },
+            "command": { "enum": ["get", "list", "cancel"] },
+            "task_id": { "type": "string", "format": "uuid" }
+          },
+          "required": ["action", "command"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "annotations": {
+      "readOnlyHint": false,
+      "destructiveHint": true,
+      "idempotentHint": false,
+      "openWorldHint": false
+    }
+  },
+  "official_all_toolsets_plugins": [
+    "AIModuleToolset", "AnimationAssistantToolset", "AutomationTestToolset",
+    "ConfigSettingsToolset", "ConversationToolset", "DataRegistryToolset",
+    "DataflowAgent", "EditorToolset", "GameFeaturesToolset", "GameplayTagsToolset",
+    "GASToolsets", "MCPClientToolset", "NiagaraToolsets", "PCGToolset",
+    "PhysicsToolsets", "PluginToolset", "SemanticSearchToolset",
+    "SlateInspectorToolset", "StateTreeToolset", "UMGToolSet", "WorldConditionsToolset"
+  ],
+  "capabilities": [
+    { "id": "actor-world", "title": "Actors and worlds", "summary": "Find, spawn, select, transform, attach, inspect, and delete actors; load and save levels.", "official_plugins": ["EditorToolset"], "backend": "python", "keywords": ["actor", "world", "level", "map", "transform", "spawn", "selection", "pie"], "examples": ["unreal.EditorActorSubsystem", "unreal.EditorLoadingAndSavingUtils"] },
+    { "id": "asset", "title": "Assets and Content Browser", "summary": "Query, create, import, duplicate, rename, save, export, and delete assets and folders.", "official_plugins": ["EditorToolset"], "backend": "python", "keywords": ["asset", "content browser", "registry", "import", "rename", "save"], "examples": ["unreal.AssetRegistryHelpers", "unreal.EditorAssetLibrary", "unreal.AssetToolsHelpers"] },
+    { "id": "blueprint", "title": "Blueprints and reflection", "summary": "Create and inspect Blueprint assets, classes, variables and components; compile and validate them.", "official_plugins": ["EditorToolset"], "backend": "python", "keywords": ["blueprint", "graph", "class", "component", "compile", "reflection"], "examples": ["unreal.BlueprintEditorLibrary", "get_editor_property", "set_editor_property"] },
+    { "id": "ai-navigation", "title": "AI and navigation", "summary": "Inspect AI systems, behavior assets, controllers, perception, and navigation data.", "official_plugins": ["AIModuleToolset"], "backend": "python", "keywords": ["ai", "navigation", "navmesh", "behavior tree", "blackboard", "perception"], "examples": ["unreal.AISystem", "unreal.NavigationSystemV1"] },
+    { "id": "animation", "title": "Animation and Control Rig", "summary": "Inspect and edit animations, rigs, keys, bindings, sections, and Sequencer data.", "official_plugins": ["AnimationAssistantToolset", "SequencerAnimMixerToolset"], "backend": "python", "keywords": ["animation", "control rig", "sequencer", "keyframe", "binding"], "examples": ["unreal.ControlRigSequencerLibrary", "unreal.SequencerTools"] },
+    { "id": "automation", "title": "Automation tests", "summary": "Discover, run, stop, and inspect Unreal Automation tests and results.", "official_plugins": ["AutomationTestToolset"], "backend": "console", "keywords": ["automation", "test", "functional test", "result", "smoke"], "examples": ["Automation List", "Automation RunTests", "Automation Stop"] },
+    { "id": "config", "title": "Project and editor settings", "summary": "Inspect, update, reset, and persist configuration and reflected settings.", "official_plugins": ["ConfigSettingsToolset"], "backend": "python", "keywords": ["config", "ini", "settings", "preferences", "default"], "examples": ["unreal.get_default_object", "save_config"] },
+    { "id": "conversation", "title": "Conversation graphs", "summary": "Create and edit conversation assets, nodes, links, participants, and entry points.", "official_plugins": ["ConversationToolset"], "backend": "python", "keywords": ["conversation", "dialogue", "participant", "node", "quest"], "examples": ["reflected CommonConversation classes"] },
+    { "id": "data-registry", "title": "Data Registry", "summary": "List registries, sources, schemas, runtime sources, and resolved items.", "official_plugins": ["DataRegistryToolset"], "backend": "python", "keywords": ["data registry", "data table", "source", "schema", "item"], "examples": ["unreal.DataRegistrySubsystem"] },
+    { "id": "dataflow", "title": "Dataflow graphs", "summary": "Create and modify Dataflow graphs, nodes, pins, comments, and variables.", "official_plugins": ["DataflowAgent"], "backend": "python", "keywords": ["dataflow", "graph", "node", "pin", "variable", "geometry collection"], "examples": ["reflected Dataflow editor subsystems"] },
+    { "id": "editor-ui", "title": "Editor state and capture", "summary": "Inspect selections, open assets, viewport state, camera state, and capture images.", "official_plugins": ["EditorToolset", "SlateInspectorToolset"], "backend": "python", "keywords": ["editor", "viewport", "camera", "capture", "screenshot", "selection"], "examples": ["unreal.UnrealEditorSubsystem", "unreal.AutomationLibrary"] },
+    { "id": "logs-cvars", "title": "Logs and console variables", "summary": "Inspect logs, categories, verbosity, console variables, and console commands.", "official_plugins": ["EditorToolset"], "backend": "console", "keywords": ["log", "output log", "cvar", "console", "verbosity"], "examples": ["unreal.SystemLibrary.execute_console_command"] },
+    { "id": "game-features", "title": "Game Features", "summary": "Discover Game Feature plugins and request activation or deactivation.", "official_plugins": ["GameFeaturesToolset"], "backend": "python", "keywords": ["game feature", "plugin state", "activate", "deactivate"], "examples": ["unreal.GameFeaturesSubsystem"] },
+    { "id": "gameplay-tags", "title": "Gameplay Tags", "summary": "Inspect, add, remove, rename, and find references to Gameplay Tags.", "official_plugins": ["GameplayTagsToolset"], "backend": "python", "keywords": ["gameplay tag", "tag source", "redirect", "reference"], "examples": ["unreal.GameplayTagsManager"] },
+    { "id": "gas", "title": "Gameplay Ability System", "summary": "Inspect abilities, attribute sets, active effects, tags, and Gameplay Cues.", "official_plugins": ["GASToolsets"], "backend": "python", "keywords": ["gas", "gameplay ability", "attribute", "effect", "gameplay cue"], "examples": ["unreal.AbilitySystemComponent", "unreal.GameplayCueManager"] },
+    { "id": "mcp-client", "title": "UE-side MCP clients", "summary": "Inspect UE-side MCP client configurations and toolsets when enabled.", "official_plugins": ["MCPClientToolset"], "backend": "python", "keywords": ["mcp", "client", "server", "toolset"], "examples": ["reflected MCPClientToolset APIs"] },
+    { "id": "niagara", "title": "Niagara", "summary": "Create and inspect systems, emitters, scripts, renderers, modules, and parameters.", "official_plugins": ["NiagaraToolsets"], "backend": "python", "keywords": ["niagara", "vfx", "emitter", "renderer", "module", "particle"], "examples": ["unreal.NiagaraEditorSubsystem", "unreal.NiagaraFunctionLibrary"] },
+    { "id": "pcg", "title": "Procedural Content Generation", "summary": "Create and edit PCG graphs and nodes, run generation, and perform spatial queries.", "official_plugins": ["PCGToolset"], "backend": "python", "keywords": ["pcg", "procedural", "graph", "node", "spatial", "generate"], "examples": ["unreal.PCGSubsystem", "unreal.PCGGraph", "unreal.PCGComponent"] },
+    { "id": "physics", "title": "Physics assets", "summary": "Create and edit bodies, shapes, mass properties, constraints, and limits.", "official_plugins": ["PhysicsToolsets"], "backend": "python", "keywords": ["physics", "body", "constraint", "sphere", "capsule", "mass"], "examples": ["unreal.PhysicsAsset", "unreal.PhysicsConstraintTemplate"] },
+    { "id": "plugins", "title": "Plugin management", "summary": "Discover plugins, inspect dependencies, create project plugins, and update descriptors.", "official_plugins": ["PluginToolset"], "backend": "python", "keywords": ["plugin", "uplugin", "dependency", "enable", "descriptor"], "examples": ["unreal.PluginBlueprintLibrary"] },
+    { "id": "semantic-search", "title": "Semantic search", "summary": "Index and search project assets or source descriptions semantically when available.", "official_plugins": ["SemanticSearchToolset"], "backend": "python", "keywords": ["semantic", "search", "embedding", "index", "similarity"], "examples": ["reflected SemanticSearch APIs"] },
+    { "id": "slate", "title": "Slate inspection and interaction", "summary": "Inspect widget trees and automate clicks, typing, dragging, forms, and screenshots.", "official_plugins": ["SlateInspectorToolset"], "backend": "python", "keywords": ["slate", "widget", "window", "click", "drag", "keyboard", "form"], "examples": ["unreal.AutomationDriverLibrary", "reflected Slate test APIs"] },
+    { "id": "state-tree", "title": "StateTree", "summary": "Inspect and edit StateTree tasks, evaluators, transitions, conditions, and bindings.", "official_plugins": ["StateTreeToolset"], "backend": "python", "keywords": ["state tree", "statetree", "task", "transition", "condition", "binding"], "examples": ["reflected StateTree editor data"] },
+    { "id": "umg", "title": "UMG and MVVM", "summary": "Create Widget Blueprints and edit widget trees, slots, variables, events, and bindings.", "official_plugins": ["UMGToolSet", "MVVMToolset"], "backend": "python", "keywords": ["umg", "widget blueprint", "panel", "slot", "mvvm", "binding"], "examples": ["unreal.WidgetBlueprint", "unreal.WidgetBlueprintLibrary"] },
+    { "id": "world-conditions", "title": "World Conditions", "summary": "Inspect and evaluate World Condition schemas, contexts, and query definitions.", "official_plugins": ["WorldConditionsToolset"], "backend": "python", "keywords": ["world condition", "condition", "query", "schema", "context"], "examples": ["reflected WorldConditions APIs"] },
+    { "id": "unlua", "title": "UnLua and project APIs", "summary": "Inspect UnLua classes, execute project Python helpers, and interact with project-specific reflected APIs.", "official_plugins": [], "backend": "python", "keywords": ["unlua", "lua", "project api", "custom", "reflection"], "examples": ["unreal.load_class", "unreal.load_object"] }
+  ]
+}

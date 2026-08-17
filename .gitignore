@@ -1,0 +1,57 @@
+# Unreal Engine generated directories (repository, host project, and plugin)
+**/Binaries/
+**/Build/Receipts/
+**/DerivedDataCache/
+**/Intermediate/
+**/Saved/
+
+# Generated release packages; publish these as release/Fab attachments
+/artifacts/
+
+# Node.js development and test output (not a product runtime dependency)
+/node_modules/
+/dist/
+/coverage/
+/.nyc_output/
+*.tsbuildinfo
+
+# Local Codex/MCP configuration may contain machine paths or bearer tokens
+/.codex/
+
+# IDE and generated project files
+/.vs/
+/.vscode/
+/.idea/
+*.sln
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+*.code-workspace
+*.xcodeproj
+*.xcworkspace
+
+# Compiled/debug by-products outside the standard UE directories
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+
+# Logs, crash dumps, and temporary files
+*.log
+*.dmp
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+
+# Operating-system metadata
+.DS_Store
+Thumbs.db
+Desktop.ini

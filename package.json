@@ -1,0 +1,21 @@
+{
+  "name": "ue57-mcp",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "description": "Development-only protocol tests for the native UnrealMCP UE plugin",
+  "license": "MIT",
+  "scripts": {
+    "build:native": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-native-gateway.ps1",
+    "build:plugin": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/build-plugin.ps1",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build:native && npm run check && vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "2.0.0",
+    "@types/node": "24.10.1",
+    "typescript": "7.0.2",
+    "vitest": "4.1.10"
+  }
+}

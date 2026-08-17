@@ -1,0 +1,28 @@
+{
+  "FileVersion": 3,
+  "Version": 2,
+  "VersionName": "0.2.0",
+  "FriendlyName": "Minimal MCP for Unreal Editor",
+  "Description": "Self-contained native MCP stdio gateway and loopback Unreal Editor worker.",
+  "Category": "Editor",
+  "CreatedBy": "UnrealMCP contributors",
+  "CanContainContent": false,
+  "EnabledByDefault": false,
+  "IsBetaVersion": false,
+  "SupportedTargetPlatforms": [
+    "Win64"
+  ],
+  "Modules": [
+    {
+      "Name": "UnrealMCP",
+      "Type": "Editor",
+      "LoadingPhase": "PostEngineInit"
+    }
+  ],
+  "Plugins": [
+    {
+      "Name": "PythonScriptPlugin",
+      "Enabled": true
+    }
+  ]
+}
