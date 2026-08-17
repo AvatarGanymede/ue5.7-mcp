@@ -1,6 +1,6 @@
 # UnrealMCP — native MCP for Unreal Engine 5.7
 
-[English](README.md) | [Simplified Chinese](README.zh-CN.md)
+[English](README.md) | [简体中文](README.zh-CN.md)
 
 UnrealMCP is a self-contained Unreal Engine 5.7 Editor Code Plugin. It lets Codex and other local MCP clients inspect and control an open Unreal Editor while exposing exactly one MCP tool: `unreal`.
 
