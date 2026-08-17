@@ -11,11 +11,11 @@ UnrealMCP 是一个自包含的 Unreal Engine 5.7 编辑器代码插件。它让
 
 ## 主要特点
 
-- **单工具接口：**发现能力、健康检查、执行命令和异步任务控制均通过 `unreal` 完成。
-- **完全自包含：**发布插件同时包含原生 stdio 网关和 Unreal Editor Worker。
-- **适合 Agent：**有序 Python/控制台批处理可灵活访问 UE 反射 API 以及 UnLua 等项目专用系统。
-- **游戏线程安全：**UObject 和编辑器操作会被调度到 Unreal 游戏线程。
-- **面向 Fab 打包：**发布脚本生成不依赖外部运行时的单插件整洁 ZIP。
+- **单工具接口：** 发现能力、健康检查、执行命令和异步任务控制均通过 `unreal` 完成。
+- **完全自包含：** 发布插件同时包含原生 stdio 网关和 Unreal Editor Worker。
+- **适合 Agent：** 有序 Python/控制台批处理可灵活访问 UE 反射 API 以及 UnLua 等项目专用系统。
+- **游戏线程安全：** UObject 和编辑器操作会被调度到 Unreal 游戏线程。
+- **面向 Fab 打包：** 发布脚本生成不依赖外部运行时的单插件整洁 ZIP。
 
 ```mermaid
 flowchart LR
