@@ -62,6 +62,7 @@ MCP 客户端连接期间，必须保持 Unreal Editor 已启动并打开目标�
    ```
 
    就绪的服务应返回 `ok: true`、`is_game_thread: true` 和 `python_loaded: true`。
+9. 验证 `tools/list` 暴露了 `unreal`，并确认 host 将它显示为可直接调用的工具。如果 host 没有刷新 project MCP 工具，请重连或重启 host。需要从 Git Bash 排查时，可运行 `scripts/unreal-mcp.sh --list`；这个辅助脚本只用于避免手写 JSON-RPC 信封，并非产品运行时依赖。
 
 ## MCP 提供的工具集
 
@@ -70,14 +71,21 @@ MCP 客户端连接期间，必须保持 Unreal Editor 已启动并打开目标�
 | Action | 用途 |
 |---|---|
 | `health` | 检查服务状态、引擎版本、游戏线程调度、Python 可用性、传输方式和端点。 |
-| `discover` | 搜索能力目录，查找相关 Unreal API、子系统、控制台命令和工作流示例。 |
-| `execute` | 同步或异步执行最多 100 条有序的 Unreal Python 或控制台命令。 |
+| `discover` | 搜索能力域、可运行的 UE 5.7 API 起点，以及已发现插件的挂载状态。 |
+| `execute` | 执行最多 100 条有序 Python、控制台或异步非阻塞等待命令。 |
 | `task` | 查询、列出或取消通过 `execute` 提交的异步任务。 |
 
 检查连接：
 
 ```json
 { "action": "health" }
+```
+
+如果 MCP host 尚未直接显示 `unreal`，可以从 Git Bash 用仓库辅助脚本调用同一端点：
+
+```bash
+scripts/unreal-mcp.sh '{"action":"health"}'
+scripts/unreal-mcp.sh --list
 ```
 
 选择 UE API 前先发现相关工作流：
@@ -120,8 +128,24 @@ MCP 客户端连接期间，必须保持 Unreal Editor 已启动并打开目标�
 { "action": "task", "command": "get", "task_id": "<uuid>" }
 ```
 
-异步批处理每个游戏线程 tick 执行一条命令。300 秒墙钟时间限制和协作式取消只在命令之间检查；正在执行的 Python 或控制台命令不会被中断。`transaction: true` 会为每条命令分别记录 Undo，但批处理不具备原子性——失败、超时或取消不会回滚已经完成的命令。
+必须观察后续 Tick 的运行时断言可以使用非阻塞等待。等待命令要求 `run=async`；同步调用会被拒绝，不会用 sleep 阻塞游戏线程：
+
+```json
+{
+  "action": "execute",
+  "run": "async",
+  "transaction": false,
+  "commands": [
+    { "kind": "python", "mode": "exec", "code": "world = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_game_world(); unreal.GameplayStatics.get_player_pawn(world, 0).jump()" },
+    { "kind": "wait", "frames": 1, "label": "next-tick" },
+    { "kind": "wait", "seconds": 0.08, "label": "jump-window" },
+    { "kind": "python", "mode": "eval", "code": "(lambda pawn: (pawn.get_velocity().z, pawn.get_character_movement().is_falling()))(unreal.GameplayStatics.get_player_pawn(unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_game_world(), 0))" }
+  ]
+}
+```
+
+异步批处理每个游戏线程 tick 执行一条命令。300 秒墙钟时间限制和协作式取消只在命令之间检查；正在执行的 Python 或控制台命令不会被中断。`transaction: true` 会为每条 Python 和控制台命令分别记录 Undo；`wait` 不会添加 Undo。服务不会假设 Python `eval` 是只读操作，因为表达式仍然可以调用会修改 UObject 的方法。事务不具备原子性，Python 也可能在抛异常前已经修改 UObject。失败、超时或取消不会自动回滚；应检查 `partial_changes_possible`、`commands_completed`、`commands_succeeded` 和 `failed_command_index`，必要时进行幂等清理。Python 失败的完整 traceback 会同时出现在命令级 `result` 和 `error` 中。
 
 服务端会依据发布的 JSON Schema 校验工具参数，并强制执行固定安全上限：请求和响应各 4 MiB、HTTP 待处理队列 64 个请求、发现查询 4096 个字符、每批 100 条命令、每个 MCP 会话或客户端 128 个任务、全局 1024 个任务。异步任务的 list/get/cancel 按 `Mcp-Session-Id` 隔离；没有 MCP 会话头时使用客户端身份回退值。
 
-能力目录覆盖编辑器与资产操作、Blueprint、AI 与导航、动画、自动化、配置、对话、Data Registry、Dataflow、Game Features、Gameplay Tags 与 GAS、Niagara、PCG、物理、插件、语义搜索、Slate、StateTree、UMG、World Conditions，以及 UnLua 等工程专用反射 API。具体能力是否可用取决于相应的 UE 5.7 或工程插件是否已经启用。
+能力目录覆盖编辑器与资产操作、Blueprint、AI 与导航、动画、自动化、配置、对话、Data Registry、Dataflow、Game Features、Gameplay Tags 与 GAS、Niagara、PCG、物理、插件、语义搜索、Slate、StateTree、UMG、World Conditions，以及 UnLua 等工程专用反射 API。对 PIE、碰撞、当前动画、Player Pawn 和 Viewport Widget 等高频易错调用，目录会返回可运行 recipe。按插件名称查询时，还会报告已发现的启用或禁用插件及其 `enabled`、`mounted`、`can_contain_content`、`content_dir` 和 `mounted_asset_path`，用来诊断 Asset Registry 在插件内容挂载前无法看到的资产；服务不会递归索引禁用插件目录中的文件。具体能力是否可用取决于相应的 UE 5.7 或工程插件是否已经启用。

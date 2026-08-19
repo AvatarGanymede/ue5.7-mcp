@@ -62,6 +62,7 @@ When installing UnrealMCP for a user, follow this procedure:
    ```
 
    A ready server reports `ok: true`, `is_game_thread: true`, and `python_loaded: true`.
+9. Verify `tools/list` exposes `unreal` and that the host presents it as a directly callable tool. If the host does not refresh project MCP tools, reconnect/restart the host. For diagnostics from Git Bash, use `scripts/unreal-mcp.sh --list`; the helper avoids hand-written JSON-RPC envelopes but is not required at runtime.
 
 ## MCP Toolset
 
@@ -70,14 +71,21 @@ The server exposes one MCP tool named `unreal`. Its `action` field selects one o
 | Action | Purpose |
 |---|---|
 | `health` | Check the server, engine version, Game Thread dispatch, Python availability, transport, and endpoint. |
-| `discover` | Search the capability catalog for relevant Unreal APIs, subsystems, console commands, and example workflows. |
-| `execute` | Run an ordered batch of up to 100 Unreal Python or console commands, synchronously or asynchronously. |
+| `discover` | Search capability domains, runnable UE 5.7 API starting points, and discovered plugin mount status. |
+| `execute` | Run up to 100 ordered Python, console, or asynchronous non-blocking wait commands. |
 | `task` | Get, list, or cancel asynchronous work submitted through `execute`. |
 
 Check the connection:
 
 ```json
 { "action": "health" }
+```
+
+When the MCP host has not surfaced `unreal` directly, the repository helper can call the same endpoint from Git Bash:
+
+```bash
+scripts/unreal-mcp.sh '{"action":"health"}'
+scripts/unreal-mcp.sh --list
 ```
 
 Discover a workflow before choosing UE APIs:
@@ -120,8 +128,24 @@ For long-running work, set `"run": "async"`; the response returns a `task_id`. I
 { "action": "task", "command": "get", "task_id": "<uuid>" }
 ```
 
-Async batches execute one command per Game Thread tick. Their 300-second wall-clock limit and cooperative cancellation are checked only between commands; an in-flight Python or console command is never interrupted. `transaction: true` records each command separately for Undo and is not an atomic batch—failure, timeout, or cancellation does not roll back commands that already finished.
+Runtime assertions that must observe later ticks can use non-blocking wait commands. Waits require `run=async`; synchronous waits are rejected instead of sleeping on the Game Thread:
+
+```json
+{
+  "action": "execute",
+  "run": "async",
+  "transaction": false,
+  "commands": [
+    { "kind": "python", "mode": "exec", "code": "world = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_game_world(); unreal.GameplayStatics.get_player_pawn(world, 0).jump()" },
+    { "kind": "wait", "frames": 1, "label": "next-tick" },
+    { "kind": "wait", "seconds": 0.08, "label": "jump-window" },
+    { "kind": "python", "mode": "eval", "code": "(lambda pawn: (pawn.get_velocity().z, pawn.get_character_movement().is_falling()))(unreal.GameplayStatics.get_player_pawn(unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_game_world(), 0))" }
+  ]
+}
+```
+
+Async batches execute one command per Game Thread tick. Their 300-second wall-clock limit and cooperative cancellation are checked only between commands; an in-flight Python or console command is never interrupted. `transaction: true` records each Python and console command separately for Undo; `wait` does not add an Undo entry. Python `eval` is not assumed to be read-only because an expression can call mutating UObject methods. Transactions are not atomic, and Python can change objects before raising. Failures, timeouts, and cancellation do not automatically roll back; inspect `partial_changes_possible`, `commands_completed`, `commands_succeeded`, and `failed_command_index`, then clean up idempotently when needed. Python failures expose the full traceback in both the command `result` and `error` fields.
 
 The server validates tool arguments against the published JSON Schema and applies fixed safety limits: 4 MiB request and response bodies, 64 queued HTTP requests, 4096-character discovery queries, 100 commands per batch, 128 tasks per MCP session/client, and 1024 tasks globally. Async task list/get/cancel operations are isolated by `Mcp-Session-Id` (or the client identity fallback when no MCP session header is available).
 
-The discovery catalog covers editor and asset operations, Blueprints, AI and navigation, animation, automation, configuration, conversations, Data Registry, Dataflow, Game Features, Gameplay Tags and GAS, Niagara, PCG, physics, plugins, semantic search, Slate, StateTree, UMG, World Conditions, and project-specific reflected APIs such as UnLua. Availability depends on the corresponding UE 5.7 or project plugin being enabled.
+The discovery catalog covers editor and asset operations, Blueprints, AI and navigation, animation, automation, configuration, conversations, Data Registry, Dataflow, Game Features, Gameplay Tags and GAS, Niagara, PCG, physics, plugins, semantic search, Slate, StateTree, UMG, World Conditions, and project-specific reflected APIs such as UnLua. High-friction PIE, collision, current-animation, player-pawn, and viewport-widget queries include runnable recipes. A plugin-name query also reports discovered plugins whether enabled or disabled, including `enabled`, `mounted`, `can_contain_content`, `content_dir`, and `mounted_asset_path`; this helps diagnose assets that Asset Registry cannot see until plugin content is mounted. It does not recursively index files inside disabled plugin directories. Availability depends on the corresponding UE 5.7 or project plugin being enabled.

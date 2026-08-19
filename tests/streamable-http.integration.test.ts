@@ -1,10 +1,16 @@
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 const serverUrl = process.env.UE_MCP_TEST_URL;
 const serverToken = process.env.UE_MCP_TEST_TOKEN;
 const httpIt = serverUrl ? it : it.skip;
 const authenticatedHttpIt = serverUrl && serverToken ? it : it.skip;
+const packageVersion = (JSON.parse(readFileSync(
+  fileURLToPath(new URL("../package.json", import.meta.url)),
+  "utf8",
+)) as { version: string }).version;
 
 type JsonRpcResponse = {
   result?: {
@@ -20,11 +26,24 @@ type JsonRpcResponse = {
           result?: { results?: unknown[]; transaction_atomic?: boolean };
         };
         tasks?: Array<{ id: string; state: string }>;
-        results?: unknown[];
         transaction_recorded?: boolean;
         transaction_atomic?: boolean;
         transaction_rolled_back?: boolean;
         timed_out?: boolean;
+        partial_changes_possible?: boolean;
+        commands_completed?: number;
+        commands_succeeded?: number;
+        failed_command_index?: number;
+        matched?: number;
+        results?: Array<{ id?: string; kind?: string; error?: string }>;
+        plugins?: Array<{
+          name: string;
+          enabled: boolean;
+          mounted: boolean;
+          can_contain_content: boolean;
+          content_dir: string;
+          mounted_asset_path: string;
+        }>;
       };
     };
   };
@@ -74,6 +93,7 @@ describe("in-editor Streamable HTTP MCP server", () => {
     clients.push(client);
     await client.connect(transport);
 
+    expect(client.getServerVersion()?.version).toBe(packageVersion);
     expect((await client.listTools()).tools.map((tool) => tool.name)).toEqual(["unreal"]);
     const health = await client.callTool({ name: "unreal", arguments: { action: "health" } });
     expect(health.isError).toBe(false);
@@ -98,6 +118,47 @@ describe("in-editor Streamable HTTP MCP server", () => {
       expect(response.result?.structuredContent?.ok).toBe(false);
       expect(response.result?.structuredContent?.error).toContain("Invalid arguments:");
     }
+
+    const legacyList = await rawToolCall(session, {
+      action: "task",
+      command: "list",
+      task_id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee",
+    });
+    expect(legacyList.result?.isError).toBe(false);
+    expect(legacyList.result?.structuredContent?.ok).toBe(true);
+  });
+
+  httpIt("ranks actionable discovery results and reports plugin mount diagnostics", async () => {
+    const session = "acacacac-acac-4cac-8cac-acacacacacac";
+    const discovered = await rawToolCall(session, {
+      action: "discover",
+      query: "list actors in the current editor level and inspect transforms",
+      limit: 3,
+    });
+    expect(discovered.result?.structuredContent?.data?.results?.[0]?.id).toBe("actor-world");
+    expect(discovered.result?.structuredContent?.data?.matched).toBeGreaterThan(0);
+
+    const plugins = await rawToolCall(session, {
+      action: "discover",
+      domain: "plugins",
+      query: "ModelContextProtocol",
+      limit: 3,
+    });
+    expect(plugins.result?.structuredContent?.data?.plugins).toContainEqual(
+      expect.objectContaining({
+        name: "ModelContextProtocol",
+        enabled: true,
+        mounted: true,
+        can_contain_content: false,
+      }),
+    );
+
+    const evalQuery = await rawToolCall(session, {
+      action: "execute",
+      transaction: true,
+      commands: [{ kind: "python", mode: "eval", code: "1 + 1" }],
+    });
+    expect(evalQuery.result?.structuredContent?.data?.transaction_recorded).toBe(true);
   });
 
   authenticatedHttpIt("rejects missing and invalid bearer credentials", async () => {
@@ -208,6 +269,49 @@ describe("in-editor Streamable HTTP MCP server", () => {
     );
   });
 
+  httpIt("waits across ticks without blocking asynchronous runtime checks", async () => {
+    const session = "abababab-abab-4bab-8bab-abababababab";
+    const sync = await rawToolCall(session, {
+      action: "execute",
+      run: "sync",
+      transaction: false,
+      commands: [{ kind: "wait", seconds: 0.05 }],
+    });
+    expect(sync.result?.isError).toBe(true);
+    expect(sync.result?.structuredContent?.error).toContain("run=async");
+
+    const startedAt = Date.now();
+    const created = await rawToolCall(session, {
+      action: "execute",
+      run: "async",
+      transaction: true,
+      commands: [
+        { kind: "python", mode: "eval", code: "unreal.SystemLibrary.get_engine_version()" },
+        { kind: "wait", frames: 2, label: "two-ticks" },
+        { kind: "wait", seconds: 0.05, label: "runtime-window" },
+        { kind: "python", mode: "eval", code: "unreal.SystemLibrary.get_engine_version()" },
+      ],
+    });
+    const taskId = created.result?.structuredContent?.data?.task?.id;
+    expect(taskId).toBeTruthy();
+
+    let snapshot: JsonRpcResponse | undefined;
+    for (let attempt = 0; attempt < 50; ++attempt) {
+      snapshot = await rawToolCall(session, {
+        action: "task",
+        command: "get",
+        task_id: taskId,
+      });
+      if (snapshot.result?.structuredContent?.data?.task?.state !== "running") break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    const task = snapshot?.result?.structuredContent?.data?.task;
+    expect(task?.state).toBe("succeeded");
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(40);
+    expect(JSON.stringify(task?.result?.results)).toContain('"kind":"wait"');
+    expect(task?.result?.transaction_atomic).toBe(false);
+  });
+
   httpIt("keeps completed command effects when a later transactional command fails", async () => {
     const session = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
     const response = await rawToolCall(session, {
@@ -225,9 +329,17 @@ describe("in-editor Streamable HTTP MCP server", () => {
     expect(response.result?.isError).toBe(true);
     expect(response.result?.structuredContent).toMatchObject({
       ok: false,
-      data: { transaction_atomic: false, transaction_rolled_back: false },
+      data: {
+        transaction_atomic: false,
+        transaction_rolled_back: false,
+        partial_changes_possible: true,
+        commands_completed: 2,
+        commands_succeeded: 1,
+        failed_command_index: 1,
+      },
     });
     expect(response.result?.structuredContent?.data?.results).toHaveLength(2);
+    expect(JSON.stringify(response)).toContain('"error":"Traceback');
 
     const probe = await rawToolCall(session, {
       action: "execute",

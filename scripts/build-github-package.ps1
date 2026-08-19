@@ -11,7 +11,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 if (-not $OutputFile) {
-    $OutputFile = Join-Path $repositoryRoot 'artifacts\UnrealMCP-0.4.0-UE5.7-Win64-GitHub.zip'
+    $OutputFile = Join-Path $repositoryRoot 'artifacts\UnrealMCP-0.5.0-UE5.7-Win64-GitHub.zip'
 }
 $OutputFile = [System.IO.Path]::GetFullPath($OutputFile)
 if (Test-Path -LiteralPath $OutputFile) {

@@ -8,6 +8,7 @@ type Metadata = {
     inputSchema: {
       oneOf: Array<{
         properties?: Record<string, Record<string, unknown>>;
+        required?: string[];
         oneOf?: Array<{ required?: string[] }>;
       }>;
     };
@@ -20,11 +21,34 @@ const metadataPath = fileURLToPath(
   new URL("../ModelContextProtocol/Resources/ModelContextProtocol/metadata.json", import.meta.url),
 );
 const metadata = JSON.parse(readFileSync(metadataPath, "utf8")) as Metadata;
+const packageMetadata = JSON.parse(source("../package.json")) as { version: string };
+const pluginDescriptor = JSON.parse(
+  source("../ModelContextProtocol/ModelContextProtocol.uplugin"),
+) as { Version: number; VersionName: string };
+
+function source(relativePath: string): string {
+  return readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), "utf8");
+}
 
 describe("in-editor MCP metadata", () => {
   it("describes exactly one unreal tool", () => {
     expect(metadata.tool.name).toBe("unreal");
     expect(metadata.tool.inputSchema).toBeTypeOf("object");
+  });
+
+  it("keeps release version references aligned", () => {
+    expect(packageMetadata.version).toBe(pluginDescriptor.VersionName);
+    expect(pluginDescriptor.VersionName).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(pluginDescriptor.Version).toBeGreaterThan(0);
+    expect(source("../ModelContextProtocol/THIRD_PARTY_NOTICES.md")).toContain(
+      `UnrealMCP ${pluginDescriptor.VersionName}`,
+    );
+    expect(source("../scripts/build-github-package.ps1")).toContain(
+      `UnrealMCP-${pluginDescriptor.VersionName}-UE5.7-Win64-GitHub.zip`,
+    );
+    expect(source("../scripts/build-fab-package.ps1")).toContain(
+      `UnrealMCP-${pluginDescriptor.VersionName}-UE5.7-Win64.zip`,
+    );
   });
 
   it("routes every UE 5.8 AllToolsets plugin", () => {
@@ -51,15 +75,39 @@ describe("in-editor MCP metadata", () => {
     const execute = metadata.tool.inputSchema.oneOf.find(
       (branch) => branch.properties?.action?.const === "execute",
     );
-    const task = metadata.tool.inputSchema.oneOf.find(
-      (branch) => branch.properties?.action?.const === "task",
+    const taskGetOrCancel = metadata.tool.inputSchema.oneOf.find(
+      (branch) => Array.isArray(branch.properties?.command?.enum),
+    );
+    const taskList = metadata.tool.inputSchema.oneOf.find(
+      (branch) => branch.properties?.command?.const === "list",
     );
 
     expect(execute?.properties?.transaction?.description).toContain("not atomic");
     expect(execute?.properties?.run?.description).toContain("between commands");
-    expect(task?.properties?.command?.description).toContain("only between commands");
-    expect(task?.oneOf).toEqual(expect.arrayContaining([
-      expect.objectContaining({ required: ["task_id"] }),
-    ]));
+    expect(execute?.properties?.transaction?.description).toContain("partial changes");
+    expect(taskGetOrCancel?.properties?.command?.description).toContain("only between commands");
+    expect(taskGetOrCancel?.required).toEqual(["action", "command", "task_id"]);
+    expect(taskList?.properties?.task_id?.description).toContain("backward compatibility");
+  });
+
+  it("offers non-blocking waits and runnable UE 5.7 recipes", () => {
+    const execute = metadata.tool.inputSchema.oneOf.find(
+      (branch) => branch.properties?.action?.const === "execute",
+    );
+    const commandVariants = execute?.properties?.commands?.items as {
+      oneOf?: Array<{ properties?: Record<string, Record<string, unknown>> }>;
+    } | undefined;
+    const waitVariants = commandVariants?.oneOf?.filter(
+      (branch) => branch.properties?.kind?.const === "wait",
+    );
+    expect(waitVariants).toHaveLength(2);
+    expect(waitVariants?.some((branch) => branch.properties?.frames)).toBe(true);
+    expect(waitVariants?.some((branch) => branch.properties?.seconds)).toBe(true);
+
+    const actorWorld = metadata.capabilities.find((entry) => entry.id === "actor-world") as
+      | { recipes?: Array<{ name: string; code: string }> }
+      | undefined;
+    expect(actorWorld?.recipes?.map((recipe) => recipe.name)).toContain("trigger_pawn_overlap");
+    expect(JSON.stringify(actorWorld?.recipes)).toContain("CollisionResponseType.ECR_OVERLAP");
   });
 });

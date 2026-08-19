@@ -38,9 +38,10 @@ namespace
     constexpr double MaxExecutionSeconds = 300.0;
     const TCHAR* LatestProtocolVersion = TEXT("2026-07-28");
     const TCHAR* ServerInstructions =
-        TEXT("One tool is exposed. Use action=discover for unfamiliar Unreal APIs, then action=execute with a compact ")
-        TEXT("Python/console batch. Use eval for queries, exec for mutations, and async plus task.get for long work. ")
-        TEXT("UObject and editor calls run on Unreal's Game Thread.");
+        TEXT("One tool is exposed. Use action=discover for Unreal API starting points and runnable recipes, then action=execute ")
+        TEXT("with a compact Python/console batch. Use eval for queries, exec for mutations, and run=async with wait plus task.get ")
+        TEXT("for cross-Tick runtime checks. UObject and editor calls run on Unreal's Game Thread. Failed exec/console commands may ")
+        TEXT("leave partial changes even when transaction=true; inspect partial_changes_possible.");
 
     FString ServerVersion()
     {
@@ -865,8 +866,21 @@ TSharedRef<FJsonObject> FUnrealMCPServer::Discover(const TSharedRef<FJsonObject>
     {
         Normalized.ReplaceCharInline(Character, TEXT(' '));
     }
+    Normalized.TrimStartAndEndInline();
+    TArray<FString> ParsedTerms;
+    Normalized.ParseIntoArrayWS(ParsedTerms);
+    static const TSet<FString> StopWords = {
+        TEXT("a"), TEXT("an"), TEXT("the"), TEXT("and"), TEXT("or"), TEXT("in"), TEXT("on"),
+        TEXT("of"), TEXT("to"), TEXT("for"), TEXT("with"), TEXT("from"), TEXT("current"),
+        TEXT("then"), TEXT("safely"), TEXT("please"), TEXT("how"), TEXT("do") };
     TArray<FString> Terms;
-    Normalized.ParseIntoArrayWS(Terms);
+    for (const FString& Term : ParsedTerms)
+    {
+        if (!StopWords.Contains(Term) && !Terms.Contains(Term))
+        {
+            Terms.Add(Term);
+        }
+    }
 
     int32 Limit = 12;
     Arguments->TryGetNumberField(TEXT("limit"), Limit);
@@ -896,20 +910,56 @@ TSharedRef<FJsonObject> FUnrealMCPServer::Discover(const TSharedRef<FJsonObject>
         {
             continue;
         }
-        const FString Haystack = JsonValueToString(Value).ToLower();
         int32 Score = Domain == Id ? 1000 : 0;
+        FString Title;
+        FString Summary;
+        Capability->TryGetStringField(TEXT("title"), Title);
+        Capability->TryGetStringField(TEXT("summary"), Summary);
+        Title = Title.ToLower();
+        Summary = Summary.ToLower();
+        if (!Normalized.IsEmpty())
+        {
+            if (Id == Normalized) Score += 200;
+            if (Title == Normalized) Score += 160;
+            if (Title.Contains(Normalized)) Score += 80;
+            if (Summary.Contains(Normalized)) Score += 50;
+        }
         for (const FString& Term : Terms)
         {
             if (Id == Term)
             {
-                Score += 50;
+                Score += 60;
             }
-            if (Haystack.Contains(Term))
+            else if (Id.Contains(Term) || Term.Contains(Id))
             {
-                Score += 10;
+                Score += 30;
+            }
+            if (Title.Contains(Term)) Score += 20;
+            if (Summary.Contains(Term)) Score += 8;
+
+            for (const TCHAR* FieldName : { TEXT("keywords"), TEXT("examples") })
+            {
+                const bool bKeywordField = FCString::Strcmp(FieldName, TEXT("keywords")) == 0;
+                const TArray<TSharedPtr<FJsonValue>>* Values = nullptr;
+                if (!Capability->TryGetArrayField(FieldName, Values) || !Values)
+                {
+                    continue;
+                }
+                for (const TSharedPtr<FJsonValue>& Candidate : *Values)
+                {
+                    FString Text = Candidate ? Candidate->AsString().ToLower() : FString();
+                    if (Text == Term)
+                    {
+                        Score += bKeywordField ? 40 : 15;
+                    }
+                    else if (Text.Contains(Term) || Term.Contains(Text))
+                    {
+                        Score += bKeywordField ? 20 : 7;
+                    }
+                }
             }
         }
-        if (Terms.IsEmpty() || Score > 0)
+        if ((Query.IsEmpty() && Domain.IsEmpty()) || Score > 0)
         {
             Matches.Add({ Score, Value });
         }
@@ -927,8 +977,59 @@ TSharedRef<FJsonObject> FUnrealMCPServer::Discover(const TSharedRef<FJsonObject>
     TSharedRef<FJsonObject> Data = MakeShared<FJsonObject>();
     Data->SetNumberField(TEXT("exposed_mcp_tools"), 1);
     Data->SetNumberField(TEXT("capability_domains"), Capabilities.Num());
-    Data->SetArrayField(TEXT("official_all_toolsets_plugins"), Metadata->GetArrayField(TEXT("official_all_toolsets_plugins")));
+    Data->SetNumberField(TEXT("matched"), Matches.Num());
+    Data->SetArrayField(
+        TEXT("official_all_toolsets_plugins"),
+        Metadata->GetArrayField(TEXT("official_all_toolsets_plugins")));
     Data->SetArrayField(TEXT("results"), MoveTemp(Results));
+
+    TArray<TSharedPtr<FJsonValue>> PluginResults;
+    const bool bListPlugins = Domain == TEXT("plugins");
+    for (const TSharedRef<IPlugin>& Plugin : IPluginManager::Get().GetDiscoveredPlugins())
+    {
+        const FString SearchName = (Plugin->GetName() + TEXT(" ") + Plugin->GetFriendlyName()).ToLower();
+        bool bPluginMatch = bListPlugins && Query.IsEmpty();
+        if (!Normalized.IsEmpty() && SearchName.Contains(Normalized))
+        {
+            bPluginMatch = true;
+        }
+        for (const FString& Term : Terms)
+        {
+            bPluginMatch |= Term.Len() >= 4
+                && Term != TEXT("plugin")
+                && Term != TEXT("content")
+                && SearchName.Contains(Term);
+        }
+        if (!bPluginMatch)
+        {
+            continue;
+        }
+
+        TSharedRef<FJsonObject> PluginResult = MakeShared<FJsonObject>();
+        PluginResult->SetStringField(TEXT("name"), Plugin->GetName());
+        PluginResult->SetStringField(TEXT("friendly_name"), Plugin->GetFriendlyName());
+        PluginResult->SetBoolField(TEXT("enabled"), Plugin->IsEnabled());
+        PluginResult->SetBoolField(TEXT("mounted"), Plugin->IsMounted());
+        PluginResult->SetBoolField(TEXT("can_contain_content"), Plugin->GetDescriptor().bCanContainContent);
+        PluginResult->SetStringField(TEXT("content_dir"), Plugin->GetContentDir());
+        PluginResult->SetStringField(TEXT("mounted_asset_path"), Plugin->GetMountedAssetPath());
+        PluginResults.Add(MakeShared<FJsonValueObject>(PluginResult));
+        if (PluginResults.Num() >= Limit)
+        {
+            break;
+        }
+    }
+    const bool bHadPluginResults = !PluginResults.IsEmpty();
+    if (bHadPluginResults)
+    {
+        Data->SetArrayField(TEXT("plugins"), MoveTemp(PluginResults));
+    }
+    if (Matches.IsEmpty() && !bHadPluginResults)
+    {
+        Data->SetStringField(
+            TEXT("hint"),
+            TEXT("No matching domain or plugin. Retry with a shorter English API term, omit query to list domains, or use domain=plugins with a plugin name."));
+    }
     TSharedRef<FJsonObject> Payload = MakeShared<FJsonObject>();
     Payload->SetBoolField(TEXT("ok"), true);
     Payload->SetObjectField(TEXT("data"), Data);
@@ -959,6 +1060,15 @@ TSharedRef<FJsonObject> FUnrealMCPServer::ExecuteCommands(const TSharedRef<FJson
     if (!Arguments->TryGetArrayField(TEXT("commands"), Commands) || !Commands || Commands->IsEmpty())
     {
         return ErrorPayload(TEXT("commands must be a non-empty array"));
+    }
+    for (const TSharedPtr<FJsonValue>& CommandValue : *Commands)
+    {
+        const TSharedPtr<FJsonObject> Command = CommandValue ? CommandValue->AsObject() : nullptr;
+        FString Kind;
+        if (Command && Command->TryGetStringField(TEXT("kind"), Kind) && Kind == TEXT("wait"))
+        {
+            return ErrorPayload(TEXT("wait commands require run=async so the Game Thread is not blocked"));
+        }
     }
 
     bool bUseTransaction = true;
@@ -1005,9 +1115,13 @@ TSharedRef<FJsonObject> FUnrealMCPServer::ExecuteCommands(const TSharedRef<FJson
     Payload->SetObjectField(TEXT("data"), Data);
     if (!bAllSucceeded)
     {
+        bool bPartialChangesPossible = false;
+        Data->TryGetBoolField(TEXT("partial_changes_possible"), bPartialChangesPossible);
         Payload->SetStringField(TEXT("error"), bTimedOut
-            ? TEXT("Execution time limit exceeded (300 seconds).")
-            : TEXT("One or more commands failed."));
+            ? TEXT("Execution time limit exceeded (300 seconds); partial changes may remain.")
+            : bPartialChangesPossible
+                ? TEXT("One or more commands failed; partial changes may remain and were not rolled back.")
+                : TEXT("One or more commands failed."));
     }
     return Payload;
 }
@@ -1033,22 +1147,23 @@ TSharedRef<FJsonObject> FUnrealMCPServer::ExecuteCommand(
     CommandObject->TryGetStringField(TEXT("kind"), Kind);
     CommandObject->TryGetStringField(TEXT("label"), Label);
 
-    // transaction=true records undo per command. It is intentionally not an
-    // atomic batch: later failure or cancellation never rolls back earlier work.
-    TUniquePtr<FScopedTransaction> Transaction;
-    if (bUseTransaction)
-    {
-        Transaction = MakeUnique<FScopedTransaction>(FText::Format(
-            NSLOCTEXT("ModelContextProtocol", "CommandTransaction", "MCP command {0}"),
-            FText::AsNumber(Index + 1)));
-    }
-
     if (Kind.Equals(TEXT("python"), ESearchCase::IgnoreCase))
     {
         FString Code;
         FString Mode = TEXT("exec");
         CommandObject->TryGetStringField(TEXT("code"), Code);
         CommandObject->TryGetStringField(TEXT("mode"), Mode);
+        const bool bIsEval = Mode.Equals(TEXT("eval"), ESearchCase::IgnoreCase);
+        // EvaluateStatement can still call mutating UObject methods, so an eval
+        // command is not intrinsically read-only and keeps the requested Undo scope.
+        const bool bRecordTransaction = bUseTransaction;
+        TUniquePtr<FScopedTransaction> Transaction;
+        if (bRecordTransaction)
+        {
+            Transaction = MakeUnique<FScopedTransaction>(FText::Format(
+                NSLOCTEXT("ModelContextProtocol", "CommandTransaction", "MCP command {0}"),
+                FText::AsNumber(Index + 1)));
+        }
         IPythonScriptPlugin* Python = FModuleManager::LoadModulePtr<IPythonScriptPlugin>(TEXT("PythonScriptPlugin"));
         if (Python && !Python->IsPythonInitialized())
         {
@@ -1058,13 +1173,15 @@ TSharedRef<FJsonObject> FUnrealMCPServer::ExecuteCommand(
         FPythonCommandEx PythonCommand;
         PythonCommand.Flags = EPythonCommandFlags::Unattended;
         PythonCommand.FileExecutionScope = EPythonFileExecutionScope::Private;
-        PythonCommand.ExecutionMode = Mode.Equals(TEXT("eval"), ESearchCase::IgnoreCase)
+        PythonCommand.ExecutionMode = bIsEval
             ? EPythonCommandExecutionMode::EvaluateStatement
             : EPythonCommandExecutionMode::ExecuteFile;
         PythonCommand.Command = MoveTemp(Code);
         bSucceeded = Python && Python->IsPythonInitialized() && Python->ExecPythonCommandEx(PythonCommand);
 
         TSharedRef<FJsonObject> Result = MakeCommandResult(Index, TEXT("python"), Label, bSucceeded);
+        Result->SetBoolField(TEXT("side_effects_possible"), true);
+        Result->SetBoolField(TEXT("transaction_recorded"), bRecordTransaction);
         Result->SetStringField(TEXT("result"), PythonCommand.CommandResult);
         TArray<TSharedPtr<FJsonValue>> Logs;
         for (const FPythonLogOutputEntry& Log : PythonCommand.LogOutput)
@@ -1079,6 +1196,14 @@ TSharedRef<FJsonObject> FUnrealMCPServer::ExecuteCommand(
         {
             Result->SetStringField(TEXT("error"), TEXT("PythonScriptPlugin is unavailable."));
         }
+        else if (!bSucceeded)
+        {
+            Result->SetStringField(
+                TEXT("error"),
+                PythonCommand.CommandResult.IsEmpty()
+                    ? TEXT("Python command failed; inspect logs for details.")
+                    : PythonCommand.CommandResult);
+        }
         return Result;
     }
 
@@ -1086,10 +1211,19 @@ TSharedRef<FJsonObject> FUnrealMCPServer::ExecuteCommand(
     {
         FString Command;
         CommandObject->TryGetStringField(TEXT("command"), Command);
+        TUniquePtr<FScopedTransaction> Transaction;
+        if (bUseTransaction)
+        {
+            Transaction = MakeUnique<FScopedTransaction>(FText::Format(
+                NSLOCTEXT("ModelContextProtocol", "CommandTransaction", "MCP command {0}"),
+                FText::AsNumber(Index + 1)));
+        }
         FStringOutputDevice Output;
         UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
         bSucceeded = GEngine && !Command.IsEmpty() && GEngine->Exec(World, *Command, Output);
         TSharedRef<FJsonObject> Result = MakeCommandResult(Index, TEXT("console"), Label, bSucceeded);
+        Result->SetBoolField(TEXT("side_effects_possible"), true);
+        Result->SetBoolField(TEXT("transaction_recorded"), bUseTransaction);
         Result->SetStringField(TEXT("output"), Output);
         if (!bSucceeded)
         {
@@ -1099,7 +1233,11 @@ TSharedRef<FJsonObject> FUnrealMCPServer::ExecuteCommand(
     }
 
     TSharedRef<FJsonObject> Result = MakeCommandResult(Index, Kind, Label, false);
-    Result->SetStringField(TEXT("error"), TEXT("Unsupported command kind. Expected 'python' or 'console'."));
+    Result->SetBoolField(TEXT("side_effects_possible"), false);
+    Result->SetBoolField(TEXT("transaction_recorded"), false);
+    Result->SetStringField(TEXT("error"), Kind.Equals(TEXT("wait"), ESearchCase::IgnoreCase)
+        ? TEXT("wait commands require run=async")
+        : TEXT("Unsupported command kind. Expected 'python', 'console', or asynchronous 'wait'."));
     return Result;
 }
 
@@ -1111,11 +1249,44 @@ TSharedRef<FJsonObject> FUnrealMCPServer::MakeExecutionData(
     bool bTimedOut) const
 {
     TSharedRef<FJsonObject> Data = MakeShared<FJsonObject>();
+    bool bTransactionRecorded = false;
+    bool bSideEffectsPossible = false;
+    int32 SuccessfulCommands = 0;
+    int32 FailedCommandIndex = INDEX_NONE;
+    for (const TSharedPtr<FJsonValue>& Value : Results)
+    {
+        const TSharedPtr<FJsonObject> Result = Value ? Value->AsObject() : nullptr;
+        if (!Result)
+        {
+            continue;
+        }
+        bool bCommandOk = false;
+        bool bCommandTransaction = false;
+        bool bCommandSideEffects = false;
+        Result->TryGetBoolField(TEXT("ok"), bCommandOk);
+        Result->TryGetBoolField(TEXT("transaction_recorded"), bCommandTransaction);
+        Result->TryGetBoolField(TEXT("side_effects_possible"), bCommandSideEffects);
+        bTransactionRecorded |= bCommandTransaction;
+        bSideEffectsPossible |= bCommandSideEffects;
+        SuccessfulCommands += bCommandOk ? 1 : 0;
+        if (!bCommandOk && FailedCommandIndex == INDEX_NONE)
+        {
+            Result->TryGetNumberField(TEXT("index"), FailedCommandIndex);
+        }
+    }
     Data->SetBoolField(TEXT("ok"), bAllSucceeded);
     Data->SetBoolField(TEXT("game_thread"), true);
-    Data->SetBoolField(TEXT("transaction_recorded"), bUseTransaction && !Results.IsEmpty());
+    Data->SetBoolField(TEXT("transaction_requested"), bUseTransaction);
+    Data->SetBoolField(TEXT("transaction_recorded"), bTransactionRecorded);
     Data->SetBoolField(TEXT("transaction_atomic"), false);
     Data->SetBoolField(TEXT("transaction_rolled_back"), false);
+    Data->SetBoolField(TEXT("partial_changes_possible"), !bAllSucceeded && bSideEffectsPossible);
+    Data->SetNumberField(TEXT("commands_completed"), Results.Num());
+    Data->SetNumberField(TEXT("commands_succeeded"), SuccessfulCommands);
+    if (FailedCommandIndex != INDEX_NONE)
+    {
+        Data->SetNumberField(TEXT("failed_command_index"), FailedCommandIndex);
+    }
     Data->SetBoolField(TEXT("timed_out"), bTimedOut);
     Data->SetNumberField(TEXT("duration_ms"), (FPlatformTime::Seconds() - StartedAtSeconds) * 1000.0);
     Data->SetArrayField(TEXT("results"), Results);
@@ -1142,6 +1313,51 @@ void FUnrealMCPServer::RunNextTaskCommand(FString TaskId)
         FinishTask(*Task, TEXT("timed_out"), TEXT("Execution time limit exceeded (300 seconds)."));
         return;
     }
+    if (Task->WaitingCommandIndex != INDEX_NONE)
+    {
+        const double Now = FPlatformTime::Seconds();
+        bool bWaitComplete = false;
+        if (Task->WaitRequestedFrames > 0)
+        {
+            Task->WaitFramesRemaining = FMath::Max(0, Task->WaitFramesRemaining - 1);
+            bWaitComplete = Task->WaitFramesRemaining == 0;
+        }
+        else
+        {
+            bWaitComplete = Now >= Task->WaitUntilSeconds;
+        }
+        if (!bWaitComplete)
+        {
+            Task->UpdatedAt = UtcTimestamp();
+            ScheduleTaskContinuation(TaskId);
+            return;
+        }
+
+        TSharedRef<FJsonObject> WaitResult = MakeCommandResult(
+            Task->WaitingCommandIndex, TEXT("wait"), Task->WaitLabel, true);
+        WaitResult->SetBoolField(TEXT("side_effects_possible"), false);
+        WaitResult->SetBoolField(TEXT("transaction_recorded"), false);
+        WaitResult->SetNumberField(
+            TEXT("waited_ms"),
+            (Now - Task->WaitStartedAtSeconds) * 1000.0);
+        if (Task->WaitRequestedFrames > 0)
+        {
+            WaitResult->SetNumberField(TEXT("frames"), Task->WaitRequestedFrames);
+        }
+        else
+        {
+            WaitResult->SetNumberField(TEXT("seconds"), Task->WaitRequestedSeconds);
+        }
+        Task->CommandResults.Add(MakeShared<FJsonValueObject>(WaitResult));
+        Task->WaitingCommandIndex = INDEX_NONE;
+        Task->WaitFramesRemaining = 0;
+        Task->WaitRequestedFrames = 0;
+        Task->WaitUntilSeconds = 0.0;
+        Task->WaitRequestedSeconds = 0.0;
+        Task->WaitStartedAtSeconds = 0.0;
+        Task->WaitLabel.Reset();
+        Task->UpdatedAt = UtcTimestamp();
+    }
     if (Task->NextCommandIndex >= Commands->Num())
     {
         FinishTask(*Task, Task->bAllSucceeded ? TEXT("succeeded") : TEXT("failed"),
@@ -1155,6 +1371,30 @@ void FUnrealMCPServer::RunNextTaskCommand(FString TaskId)
     Task->Arguments->TryGetBoolField(TEXT("continue_on_error"), bContinueOnError);
 
     const int32 CommandIndex = Task->NextCommandIndex++;
+    const TSharedPtr<FJsonObject> CommandObject = (*Commands)[CommandIndex]
+        ? (*Commands)[CommandIndex]->AsObject()
+        : nullptr;
+    FString Kind;
+    if (CommandObject)
+    {
+        CommandObject->TryGetStringField(TEXT("kind"), Kind);
+    }
+    if (Kind.Equals(TEXT("wait"), ESearchCase::IgnoreCase))
+    {
+        Task->WaitingCommandIndex = CommandIndex;
+        Task->WaitStartedAtSeconds = FPlatformTime::Seconds();
+        CommandObject->TryGetStringField(TEXT("label"), Task->WaitLabel);
+        CommandObject->TryGetNumberField(TEXT("frames"), Task->WaitRequestedFrames);
+        CommandObject->TryGetNumberField(TEXT("seconds"), Task->WaitRequestedSeconds);
+        Task->WaitFramesRemaining = Task->WaitRequestedFrames;
+        Task->WaitUntilSeconds = Task->WaitRequestedSeconds > 0.0
+            ? Task->WaitStartedAtSeconds + Task->WaitRequestedSeconds
+            : 0.0;
+        Task->UpdatedAt = UtcTimestamp();
+        ScheduleTaskContinuation(TaskId);
+        return;
+    }
+
     bool bSucceeded = false;
     Task->CommandResults.Add(MakeShared<FJsonValueObject>(
         ExecuteCommand((*Commands)[CommandIndex], CommandIndex, bUseTransaction, bSucceeded)));
@@ -1168,6 +1408,11 @@ void FUnrealMCPServer::RunNextTaskCommand(FString TaskId)
 
     // Yield after every command. Cancellation and timeout are observed only at
     // the next command boundary; an in-flight command is never interrupted.
+    ScheduleTaskContinuation(TaskId);
+}
+
+void FUnrealMCPServer::ScheduleTaskContinuation(const FString& TaskId)
+{
     const TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> TaskLifetime = Lifetime;
     FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
         [this, TaskLifetime, TaskId](float)
@@ -1189,13 +1434,17 @@ void FUnrealMCPServer::FinishTask(FTaskState& Task, const FString& State, const 
     }
     Task.State = State;
     Task.UpdatedAt = UtcTimestamp();
-    Task.Error = Error;
     Task.Result = MakeExecutionData(
         Task.CommandResults,
         State == TEXT("succeeded"),
         bUseTransaction,
         Task.StartedAtSeconds,
         Error == TEXT("Execution time limit exceeded (300 seconds)."));
+    bool bPartialChangesPossible = false;
+    Task.Result->TryGetBoolField(TEXT("partial_changes_possible"), bPartialChangesPossible);
+    Task.Error = bPartialChangesPossible && !Error.IsEmpty()
+        ? Error + TEXT(" Partial changes may remain and were not rolled back.")
+        : Error;
     Task.Arguments.Reset();
 }
 
@@ -1301,6 +1550,22 @@ TSharedRef<FJsonObject> FUnrealMCPServer::TaskSnapshot(const FTaskState& Task) c
     Result->SetStringField(TEXT("state"), Task.State);
     Result->SetStringField(TEXT("created_at"), Task.CreatedAt);
     Result->SetStringField(TEXT("updated_at"), Task.UpdatedAt);
+    if (Task.State == TEXT("running") && Task.WaitingCommandIndex != INDEX_NONE)
+    {
+        TSharedRef<FJsonObject> Waiting = MakeShared<FJsonObject>();
+        Waiting->SetNumberField(TEXT("command_index"), Task.WaitingCommandIndex);
+        if (Task.WaitRequestedFrames > 0)
+        {
+            Waiting->SetNumberField(TEXT("frames_remaining"), Task.WaitFramesRemaining);
+        }
+        else
+        {
+            Waiting->SetNumberField(
+                TEXT("seconds_remaining"),
+                FMath::Max(0.0, Task.WaitUntilSeconds - FPlatformTime::Seconds()));
+        }
+        Result->SetObjectField(TEXT("waiting"), Waiting);
+    }
     if (Task.Result)
     {
         Result->SetObjectField(TEXT("result"), Task.Result.ToSharedRef());

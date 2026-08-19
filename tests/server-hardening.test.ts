@@ -73,6 +73,20 @@ describe("Unreal MCP server hardening contracts", () => {
     expect(server).toContain('FinishTask(*Task, TEXT("cancelled")');
   });
 
+  it("implements wait commands by yielding ticks instead of blocking the Game Thread", () => {
+    const runner = section(
+      server,
+      "void FUnrealMCPServer::RunNextTaskCommand",
+      "void FUnrealMCPServer::ScheduleTaskContinuation",
+    );
+    expect(runner).toContain('Kind.Equals(TEXT("wait")');
+    expect(runner).toContain("WaitFramesRemaining");
+    expect(runner).toContain("WaitUntilSeconds");
+    expect(runner).toContain("ScheduleTaskContinuation(TaskId)");
+    expect(server).not.toMatch(/FPlatformProcess::Sleep|std::this_thread::sleep/);
+    expect(server).toContain('TEXT("wait commands require run=async');
+  });
+
   it("enforces queue, response, query, execution, and task-store limits", () => {
     expect(server).toContain("MaxQueuedRequests = 64");
     expect(server).toContain("MaxResponseBytes = 4 * 1024 * 1024");
@@ -87,6 +101,32 @@ describe("Unreal MCP server hardening contracts", () => {
     expect(server).toContain('Data->SetBoolField(TEXT("transaction_atomic"), false)');
     expect(server).toContain('Data->SetBoolField(TEXT("transaction_rolled_back"), false)');
     expect(server).not.toContain("Transaction->Cancel()");
+    expect(server).toContain('Data->SetBoolField(TEXT("partial_changes_possible")');
+    expect(server).toContain('Data->SetNumberField(TEXT("failed_command_index")');
+  });
+
+  it("keeps requested Undo protection for potentially mutating eval and exposes Python errors", () => {
+    const command = section(
+      server,
+      "TSharedRef<FJsonObject> FUnrealMCPServer::ExecuteCommand",
+      "TSharedRef<FJsonObject> FUnrealMCPServer::MakeExecutionData",
+    );
+    expect(command).toContain("const bool bRecordTransaction = bUseTransaction;");
+    expect(command).toContain("EvaluateStatement can still call mutating UObject methods");
+    expect(command).toContain('Result->SetBoolField(TEXT("transaction_recorded"), bRecordTransaction)');
+    expect(command).toContain("PythonCommand.CommandResult.IsEmpty()");
+  });
+
+  it("ranks capability fields and can diagnose disabled content plugins", () => {
+    const discover = section(
+      server,
+      "TSharedRef<FJsonObject> FUnrealMCPServer::Discover",
+      "TSharedRef<FJsonObject> FUnrealMCPServer::Health",
+    );
+    expect(discover).toContain("StopWords");
+    expect(discover).toContain("bKeywordField ? 40 : 15");
+    expect(discover).toContain("GetDiscoveredPlugins()");
+    expect(discover).toContain('PluginResult->SetBoolField(TEXT("mounted"), Plugin->IsMounted())');
   });
 
   it("cleans up partial startup after listener or route registration failure", () => {

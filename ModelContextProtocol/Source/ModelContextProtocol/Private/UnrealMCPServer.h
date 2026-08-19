@@ -32,6 +32,13 @@ private:
         bool bAllSucceeded = true;
         TSharedPtr<FJsonObject> Result;
         FString Error;
+        int32 WaitingCommandIndex = INDEX_NONE;
+        int32 WaitFramesRemaining = 0;
+        int32 WaitRequestedFrames = 0;
+        double WaitUntilSeconds = 0.0;
+        double WaitRequestedSeconds = 0.0;
+        double WaitStartedAtSeconds = 0.0;
+        FString WaitLabel;
     };
 
     bool HandleMcpPost(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete);
@@ -60,6 +67,7 @@ private:
         double StartedAtSeconds,
         bool bTimedOut = false) const;
     void RunNextTaskCommand(FString TaskId);
+    void ScheduleTaskContinuation(const FString& TaskId);
     void FinishTask(FTaskState& Task, const FString& State, const FString& Error = FString());
     TSharedRef<FJsonObject> HandleTask(const TSharedRef<FJsonObject>& Arguments);
 
