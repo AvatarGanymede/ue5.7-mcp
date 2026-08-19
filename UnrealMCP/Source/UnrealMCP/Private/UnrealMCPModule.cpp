@@ -1,20 +1,20 @@
 #include "UnrealMCPModule.h"
 
-#include "UnrealMCPWorkerServer.h"
+#include "UnrealMCPServer.h"
 
 IMPLEMENT_MODULE(FUnrealMCPModule, UnrealMCP)
 
 void FUnrealMCPModule::StartupModule()
 {
-    WorkerServer = MakeUnique<FUnrealMCPWorkerServer>();
-    WorkerServer->Start();
+    Server = MakeUnique<FUnrealMCPServer>();
+    Server->Start();
 }
 
 void FUnrealMCPModule::ShutdownModule()
 {
-    if (WorkerServer)
+    if (Server)
     {
-        WorkerServer->Stop();
-        WorkerServer.Reset();
+        Server->Stop();
+        Server.Reset();
     }
 }

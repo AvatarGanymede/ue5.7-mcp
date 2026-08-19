@@ -4,7 +4,7 @@ Baseline inspected: Epic `UnrealEngine` branch `5.8`, commit `265a0946fedc02a002
 
 UE 5.8's `AllToolsets.uplugin` enables 21 Toolset plugins. The independent catalog maps all 21 to one or more capability domains:
 
-| Official plugin group | Gateway domain |
+| Official plugin group | UnrealMCP domain |
 |---|---|
 | AIModuleToolset | `ai-navigation` |
 | AnimationAssistantToolset | `animation` |

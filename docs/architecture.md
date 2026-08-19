@@ -1,24 +1,23 @@
-# Native plugin architecture
+# In-editor Streamable HTTP architecture
 
 ```mermaid
 flowchart LR
-    A["Codex / MCP client"] -->|"stdio JSON-RPC"| G["UnrealMCPGateway.exe"]
-    G -->|"authenticated loopback HTTP"| W["UnrealMCP Editor module"]
-    W -->|"AsyncTask(GameThread)"| U["UE Python / Console / UObject APIs"]
+    A["Codex / MCP client"] -->|"Streamable HTTP JSON-RPC"| W["UnrealMCP Editor module /mcp"]
+    W -->|"Game Thread"| U["UE Python / Console / UObject APIs"]
 ```
 
-## Why there are two native processes
+## One server inside Unreal Editor
 
-A stdio MCP server must be a child process launched by the MCP client. An Unreal Editor module is a DLL loaded into an independently launched editor, so it cannot own the client's stdin/stdout. The plugin therefore ships a small native console executable beside its Editor DLL. Both are part of the same installable plugin and neither requires an external runtime.
+The `UnrealMCP` Editor module owns the MCP protocol server and serves the stateless Streamable HTTP endpoint directly from the Unreal Editor process. No child gateway process or external runtime is required. Clients connect to `http://127.0.0.1:18777/mcp` by default.
 
-`UnrealMCPGateway.exe` implements JSON-RPC framing, MCP `server/discover`, legacy `initialize`, `ping`, `tools/list`, `tools/call`, local capability search, async task state, bearer headers, and WinHTTP communication. It writes protocol messages only to stdout and diagnostics only to stderr.
+The module implements JSON-RPC framing, MCP `server/discover`, legacy `initialize`, `ping`, `tools/list`, `tools/call`, local capability search, async task state, and optional bearer authentication. GET returns HTTP 405 because the stateless server has no standalone SSE notification stream; request responses are returned directly from POST as `application/json`.
 
-The Editor module owns all engine-dependent work. Its HTTP handler copies request data and schedules execution onto the Game Thread before touching Python, `GEngine`, `GEditor`, or UObjects. The server binds only to localhost and does not stop listeners owned by other UE modules during shutdown.
+HTTP requests are dispatched to the Game Thread before the module touches Python, `GEngine`, `GEditor`, or UObjects. The listener binds only to localhost, validates browser origins, and does not stop listeners owned by other UE modules during shutdown.
 
 ## Protocol compatibility
 
-The gateway supports the modern 2026-07-28 discovery handshake, including result envelopes and server identity metadata, plus legacy protocol versions from 2024-11-05 through 2025-11-25. Task lifecycle remains an action inside the single normal tool, so it does not depend on protocol-specific `tasks/*` methods.
+The server supports the modern 2026-07-28 discovery handshake, including result envelopes and server identity metadata, plus legacy protocol versions from 2024-11-05 through 2025-11-25. Task lifecycle remains an action inside the single normal tool, so it does not depend on protocol-specific `tasks/*` methods.
 
 ## Distribution boundary
 
-The Fab package contains one top-level `UnrealMCP` plugin with its descriptor, Source, Config, Content, Resources, license notices, Editor binary, and native gateway executable. Node.js exists only as an optional development test client and is never included in the package.
+The Fab package contains one top-level `UnrealMCP` plugin with its descriptor, Source, Config, Content, Resources, license notices, and Editor binary. Node.js exists only as an optional development test client and is never included in the package.

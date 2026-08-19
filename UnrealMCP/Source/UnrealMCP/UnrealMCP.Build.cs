@@ -17,6 +17,7 @@ public class UnrealMCP : ModuleRules
             "Engine",
             "HTTPServer",
             "Json",
+            "Projects",
             "PythonScriptPlugin",
             "UnrealEd"
         });

@@ -11,16 +11,17 @@ param(
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 if (-not $OutputFile) {
-    $OutputFile = Join-Path $repositoryRoot 'artifacts\UnrealMCP-0.3.0-UE5.7-Win64.zip'
+    $OutputFile = Join-Path $repositoryRoot 'artifacts\UnrealMCP-0.3.0-UE5.7-Win64-GitHub.zip'
 }
 $OutputFile = [System.IO.Path]::GetFullPath($OutputFile)
 if (Test-Path -LiteralPath $OutputFile) {
     throw "Output already exists; choose a fresh path: $OutputFile"
 }
 
-$stagingRoot = Join-Path $env:TEMP ('UnrealMCP-Fab-' + [guid]::NewGuid().ToString('N'))
-$pluginPackage = Join-Path $stagingRoot 'UnrealMCP'
-New-Item -ItemType Directory -Path $stagingRoot -Force | Out-Null
+$stagingRoot = Join-Path $env:TEMP ('UnrealMCP-GitHub-' + [guid]::NewGuid().ToString('N'))
+$pluginsDirectory = Join-Path $stagingRoot 'Plugins'
+$pluginPackage = Join-Path $pluginsDirectory 'UnrealMCP'
+New-Item -ItemType Directory -Path $pluginsDirectory -Force | Out-Null
 
 try {
     & (Join-Path $PSScriptRoot 'build-plugin.ps1') -EngineRoot $EngineRoot -OutputDirectory $pluginPackage
@@ -34,29 +35,25 @@ try {
         [System.IO.File]::Delete($pdb)
     }
 
-    # Fab requires the standard Code Plugin directory shape even when a plugin
-    # intentionally has no UObject content.
-    New-Item -ItemType Directory -Path (Join-Path $pluginPackage 'Content') -Force | Out-Null
-
     $required = @(
         (Join-Path $pluginPackage 'UnrealMCP.uplugin'),
+        (Join-Path $pluginPackage 'Binaries\Win64\UnrealEditor-UnrealMCP.dll'),
         (Join-Path $pluginPackage 'Source'),
-        (Join-Path $pluginPackage 'Content'),
         (Join-Path $pluginPackage 'Config'),
         (Join-Path $pluginPackage 'Resources'),
-        (Join-Path $pluginPackage 'Binaries\Win64\UnrealEditor-UnrealMCP.dll'),
         (Join-Path $pluginPackage 'README.md'),
         (Join-Path $pluginPackage 'README.zh-CN.md'),
-        (Join-Path $pluginPackage 'docs\architecture.md'),
-        (Join-Path $pluginPackage 'docs\capability-coverage.md'),
-        (Join-Path $pluginPackage 'docs\tool-minimization.md'),
-        (Join-Path $pluginPackage 'LICENSE'),
-        (Join-Path $pluginPackage 'THIRD_PARTY_NOTICES.md')
+        (Join-Path $pluginPackage 'LICENSE')
     )
     foreach ($path in $required) {
         if (-not (Test-Path -LiteralPath $path)) {
-            throw "Fab package is missing required path: $path"
+            throw "GitHub package is missing required path: $path"
         }
+    }
+
+    $unexpectedExecutables = @(Get-ChildItem -LiteralPath $pluginPackage -Recurse -File -Filter '*.exe')
+    if ($unexpectedExecutables.Count -gt 0) {
+        throw "GitHub package unexpectedly contains an EXE: $($unexpectedExecutables[0].FullName)"
     }
 
     $outputDirectory = Split-Path -Parent $OutputFile
@@ -71,10 +68,10 @@ try {
     Get-Item -LiteralPath $OutputFile | Select-Object FullName, Length, LastWriteTime
 }
 finally {
-    $resolvedTemp = [System.IO.Path]::GetFullPath($stagingRoot)
-    $tempRoot = [System.IO.Path]::GetFullPath($env:TEMP)
-    if ($resolvedTemp.StartsWith($tempRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase) -and
-        [System.IO.Directory]::Exists($resolvedTemp)) {
-        [System.IO.Directory]::Delete($resolvedTemp, $true)
+    $resolvedStaging = [System.IO.Path]::GetFullPath($stagingRoot)
+    $resolvedTemp = [System.IO.Path]::GetFullPath($env:TEMP)
+    if ($resolvedStaging.StartsWith($resolvedTemp + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase) -and
+        [System.IO.Directory]::Exists($resolvedStaging)) {
+        [System.IO.Directory]::Delete($resolvedStaging, $true)
     }
 }

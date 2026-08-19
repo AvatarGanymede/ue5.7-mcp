@@ -13,7 +13,7 @@ const metadataPath = fileURLToPath(
 );
 const metadata = JSON.parse(readFileSync(metadataPath, "utf8")) as Metadata;
 
-describe("native gateway metadata", () => {
+describe("in-editor MCP metadata", () => {
   it("describes exactly one unreal tool", () => {
     expect(metadata.tool.name).toBe("unreal");
     expect(metadata.tool.inputSchema).toBeTypeOf("object");

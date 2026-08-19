@@ -1,9 +1,9 @@
 {
   "FileVersion": 3,
-  "Version": 2,
-  "VersionName": "0.2.0",
+  "Version": 3,
+  "VersionName": "0.3.0",
   "FriendlyName": "Minimal MCP for Unreal Editor",
-  "Description": "Self-contained native MCP stdio gateway and loopback Unreal Editor worker.",
+  "Description": "In-editor Streamable HTTP MCP server for Unreal Engine 5.7.",
   "Category": "Editor",
   "CreatedBy": "UnrealMCP contributors",
   "CanContainContent": false,

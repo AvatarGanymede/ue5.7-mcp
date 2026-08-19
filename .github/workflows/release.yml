@@ -1,0 +1,78 @@
+name: Package and publish release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Package prebuilt Win64 plugin
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v6
+
+      - name: Validate tag and prebuilt binary versions
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_NAME -notmatch '^v(?<Version>\d+\.\d+\.\d+)$') {
+            throw "Release tag must use vMAJOR.MINOR.PATCH: $env:GITHUB_REF_NAME"
+          }
+
+          $version = $Matches.Version
+          $descriptor = Get-Content -LiteralPath 'UnrealMCP/UnrealMCP.uplugin' -Raw | ConvertFrom-Json
+          $package = Get-Content -LiteralPath 'package.json' -Raw | ConvertFrom-Json
+          if ([string]$descriptor.VersionName -ne $version) {
+            throw "Tag version $version does not match UnrealMCP.uplugin VersionName $($descriptor.VersionName)"
+          }
+          if ([string]$package.version -ne $version) {
+            throw "Tag version $version does not match package.json version $($package.version)"
+          }
+
+          $requiredBinaries = @(
+            'UnrealMCP/Binaries/Win64/UnrealEditor-UnrealMCP.dll',
+            'UnrealMCP/Binaries/Win64/UnrealEditor.modules'
+          )
+          foreach ($path in $requiredBinaries) {
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+              throw "Tagged source is missing prebuilt release binary: $path"
+            }
+          }
+
+          $zipName = "UnrealMCP-$version-UE5.7-Win64-GitHub.zip"
+          $zipPath = Join-Path $env:GITHUB_WORKSPACE "artifacts/$zipName"
+          "RELEASE_VERSION=$version" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
+          "RELEASE_ZIP=$zipPath" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
+
+      - name: Package prebuilt plugin
+        shell: pwsh
+        run: |
+          ./scripts/package-prebuilt-github-release.ps1 -OutputFile $env:RELEASE_ZIP
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: github-release-${{ github.ref_name }}
+          path: artifacts/*-GitHub.zip
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create $env:GITHUB_REF_NAME $env:RELEASE_ZIP `
+            --repo $env:GITHUB_REPOSITORY `
+            --verify-tag `
+            --generate-notes `
+            --title "UnrealMCP $env:RELEASE_VERSION - UE 5.7 Win64"

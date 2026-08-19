@@ -16,7 +16,7 @@ The official 5.8 design already demonstrates that a meta-call can select a dynam
 
 ## Loop 3: two to one
 
-Async task lifecycle was folded into the same entry as `action=task`. This is also protocol-resilient: the 2026-07-28 MCP era removes the old `tasks/*` methods, while a normal tool action works in both eras. Native stdio integration tests assert a one-item tool list in both eras.
+Async task lifecycle was folded into the same entry as `action=task`. This is also protocol-resilient: the 2026-07-28 MCP era removes the old `tasks/*` methods, while a normal tool action works in both eras. Streamable HTTP integration tests assert a one-item tool list.
 
 ## Loop 4: can one become zero?
 

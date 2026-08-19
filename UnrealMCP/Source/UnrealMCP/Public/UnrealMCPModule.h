@@ -2,7 +2,7 @@
 
 #include "Modules/ModuleManager.h"
 
-class FUnrealMCPWorkerServer;
+class FUnrealMCPServer;
 
 class FUnrealMCPModule final : public IModuleInterface
 {
@@ -11,5 +11,5 @@ public:
     virtual void ShutdownModule() override;
 
 private:
-    TUniquePtr<FUnrealMCPWorkerServer> WorkerServer;
+    TUniquePtr<FUnrealMCPServer> Server;
 };
