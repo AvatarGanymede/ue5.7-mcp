@@ -2,13 +2,13 @@
 
 ```mermaid
 flowchart LR
-    A["Codex / MCP client"] -->|"Streamable HTTP JSON-RPC"| W["UnrealMCP Editor module /mcp"]
+    A["Codex / MCP client"] -->|"Streamable HTTP JSON-RPC"| W["ModelContextProtocol Editor module /mcp"]
     W -->|"Game Thread"| U["UE Python / Console / UObject APIs"]
 ```
 
 ## One server inside Unreal Editor
 
-The `UnrealMCP` Editor module owns the MCP protocol server and serves the stateless Streamable HTTP endpoint directly from the Unreal Editor process. No child gateway process or external runtime is required. Clients connect to `http://127.0.0.1:18777/mcp` by default.
+The `ModelContextProtocol` Editor module owns the MCP protocol server and serves the stateless Streamable HTTP endpoint directly from the Unreal Editor process. No child gateway process or external runtime is required. Clients connect to `http://127.0.0.1:18777/mcp` by default.
 
 The module implements JSON-RPC framing, MCP `server/discover`, legacy `initialize`, `ping`, `tools/list`, `tools/call`, local capability search, async task state, and optional bearer authentication. GET returns HTTP 405 because the stateless server has no standalone SSE notification stream; request responses are returned directly from POST as `application/json`.
 
@@ -20,4 +20,4 @@ The server supports the modern 2026-07-28 discovery handshake, including result 
 
 ## Distribution boundary
 
-The Fab package contains one top-level `UnrealMCP` plugin with its descriptor, Source, Config, Content, Resources, license notices, and Editor binary. Node.js exists only as an optional development test client and is never included in the package.
+The Fab package contains one top-level `ModelContextProtocol` plugin with its descriptor, Source, Config, Content, Resources, license notices, and Editor binary. Node.js exists only as an optional development test client and is never included in the package.

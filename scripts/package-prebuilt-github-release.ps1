@@ -6,8 +6,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$sourcePlugin = Join-Path $repositoryRoot 'UnrealMCP'
-$descriptorPath = Join-Path $sourcePlugin 'UnrealMCP.uplugin'
+$sourcePlugin = Join-Path $repositoryRoot 'ModelContextProtocol'
+$descriptorPath = Join-Path $sourcePlugin 'ModelContextProtocol.uplugin'
 
 if (-not (Test-Path -LiteralPath $descriptorPath -PathType Leaf)) {
     throw "Plugin descriptor not found: $descriptorPath"
@@ -29,7 +29,7 @@ if (Test-Path -LiteralPath $OutputFile) {
 
 $stagingRoot = Join-Path $env:TEMP ('UnrealMCP-Prebuilt-GitHub-' + [guid]::NewGuid().ToString('N'))
 $pluginsDirectory = Join-Path $stagingRoot 'Plugins'
-$pluginPackage = Join-Path $pluginsDirectory 'UnrealMCP'
+$pluginPackage = Join-Path $pluginsDirectory 'ModelContextProtocol'
 New-Item -ItemType Directory -Path $pluginsDirectory -Force | Out-Null
 
 try {
@@ -60,8 +60,8 @@ try {
     }
 
     $required = @(
-        (Join-Path $pluginPackage 'UnrealMCP.uplugin'),
-        (Join-Path $pluginPackage 'Binaries\Win64\UnrealEditor-UnrealMCP.dll'),
+        (Join-Path $pluginPackage 'ModelContextProtocol.uplugin'),
+        (Join-Path $pluginPackage 'Binaries\Win64\UnrealEditor-ModelContextProtocol.dll'),
         (Join-Path $pluginPackage 'Binaries\Win64\UnrealEditor.modules'),
         (Join-Path $pluginPackage 'Source'),
         (Join-Path $pluginPackage 'Config'),

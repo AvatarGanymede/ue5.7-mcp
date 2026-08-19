@@ -4,11 +4,11 @@
   "Category": "Tests",
   "Description": "Temporary content-only host used for end-to-end UnrealMCP validation.",
   "AdditionalPluginDirectories": [
-    "UnrealMCP"
+    "."
   ],
   "Plugins": [
     {
-      "Name": "UnrealMCP",
+      "Name": "ModelContextProtocol",
       "Enabled": true
     },
     {

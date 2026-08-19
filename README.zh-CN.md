@@ -15,19 +15,19 @@ MCP 客户端连接期间，必须保持 Unreal Editor 已启动并打开目标�
 ### For Human
 
 1. 从 [GitHub Releases](https://github.com/AvatarGanymede/ue5.7-mcp/releases) 下载命名为 `UnrealMCP-...-UE5.7-Win64-GitHub.zip` 的附件。不要把 GitHub 自动生成的 **Source code** 压缩包当作安装包。
-2. 关闭 Unreal Editor。升级时应完整替换已有的 `Plugins/UnrealMCP` 目录，不要把新文件合并覆盖到旧安装中。
+2. 关闭 Unreal Editor。升级时应完整替换已有的 `Plugins/ModelContextProtocol` 目录，不要把新文件合并覆盖到旧安装中。从 0.3.x 或更早版本升级时，删除旧的 `Plugins/UnrealMCP` 目录；不要同时保留两个插件标识。
 3. 将 ZIP 解压到 UE 工程根目录，也就是 `.uproject` 文件旁边。最终结构必须是：
 
    ```text
    <Project>/
    ├─ <Project>.uproject
    └─ Plugins/
-      └─ UnrealMCP/
-         ├─ UnrealMCP.uplugin
-         └─ Binaries/Win64/UnrealEditor-UnrealMCP.dll
+      └─ ModelContextProtocol/
+         ├─ ModelContextProtocol.uplugin
+         └─ Binaries/Win64/UnrealEditor-ModelContextProtocol.dll
    ```
 
-4. 打开工程，在 **Edit → Plugins** 中启用 **Minimal MCP for Unreal Editor** 和 **Python Editor Script Plugin**，然后重启 Unreal Editor。
+4. 打开工程，在 **Edit → Plugins** 中启用 **MCP for Unreal Editor** 和 **Python Editor Script Plugin**，然后重启 Unreal Editor。
 5. 将 MCP 端点添加到 Codex：
 
    ```powershell
@@ -51,18 +51,11 @@ MCP 客户端连接期间，必须保持 Unreal Editor 已启动并打开目标�
 1. 查找 `.uproject` 文件以确定目标工程根目录。除非用户明确要求安装到引擎，否则使用工程级安装。
 2. 获取最新的命名发布附件 `UnrealMCP-*-UE5.7-Win64-GitHub.zip`，绝不能用 GitHub 自动生成的源码压缩包代替。
 3. 替换二进制文件前，让用户关闭 Unreal Editor。不要覆盖正在使用的插件。
-4. 解压前检查压缩包，确认包含 `Plugins/UnrealMCP/UnrealMCP.uplugin` 和 `Plugins/UnrealMCP/Binaries/Win64/UnrealEditor-UnrealMCP.dll`。
-5. 用压缩包中的插件目录完整替换 `<Project>/Plugins/UnrealMCP`。保留其他插件和工程文件不变。
-6. 添加或合并以下 MCP 配置，不要覆盖无关的 Codex 设置：
-
-   ```toml
-   [mcp_servers.unreal]
-   url = "http://127.0.0.1:18777/mcp"
-   tool_timeout_sec = 3600
-   ```
-
-7. 告知用户启用 **Minimal MCP for Unreal Editor** 和 **Python Editor Script Plugin**，然后重启 Unreal Editor 和 Codex。
-8. 两个应用重启后调用：
+4. 解压前检查压缩包，确认包含 `Plugins/ModelContextProtocol/ModelContextProtocol.uplugin` 和 `Plugins/ModelContextProtocol/Binaries/Win64/UnrealEditor-ModelContextProtocol.dll`。
+5. 用压缩包中的插件目录完整替换 `<Project>/Plugins/ModelContextProtocol`。从 0.3.x 或更早版本迁移时，删除 `<Project>/Plugins/UnrealMCP`，避免新旧插件标识同时加载。保留其他插件和工程文件不变。
+6. 按当前 agent 自身的 MCP 配置规范，将名为 `unreal`、URL 为 `http://127.0.0.1:18777/mcp` 的 Streamable HTTP 服务注册到该 agent 的 **project scope MCP list**。不要注册到 user scope 或 global scope，也不要覆盖工程内其他 MCP 条目。如果该 agent 支持工具超时设置，将其设为 3600 秒。
+7. 告知用户启用 **MCP for Unreal Editor** 和 **Python Editor Script Plugin**，然后重启 Unreal Editor。
+8. Unreal Editor 重启后调用：
 
    ```json
    { "action": "health" }
@@ -126,5 +119,9 @@ MCP 客户端连接期间，必须保持 Unreal Editor 已启动并打开目标�
 ```json
 { "action": "task", "command": "get", "task_id": "<uuid>" }
 ```
+
+异步批处理每个游戏线程 tick 执行一条命令。300 秒墙钟时间限制和协作式取消只在命令之间检查；正在执行的 Python 或控制台命令不会被中断。`transaction: true` 会为每条命令分别记录 Undo，但批处理不具备原子性——失败、超时或取消不会回滚已经完成的命令。
+
+服务端会依据发布的 JSON Schema 校验工具参数，并强制执行固定安全上限：请求和响应各 4 MiB、HTTP 待处理队列 64 个请求、发现查询 4096 个字符、每批 100 条命令、每个 MCP 会话或客户端 128 个任务、全局 1024 个任务。异步任务的 list/get/cancel 按 `Mcp-Session-Id` 隔离；没有 MCP 会话头时使用客户端身份回退值。
 
 能力目录覆盖编辑器与资产操作、Blueprint、AI 与导航、动画、自动化、配置、对话、Data Registry、Dataflow、Game Features、Gameplay Tags 与 GAS、Niagara、PCG、物理、插件、语义搜索、Slate、StateTree、UMG、World Conditions，以及 UnLua 等工程专用反射 API。具体能力是否可用取决于相应的 UE 5.7 或工程插件是否已经启用。

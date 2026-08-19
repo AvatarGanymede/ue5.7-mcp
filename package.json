@@ -1,6 +1,6 @@
 {
   "name": "ue57-mcp",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Development-only tests for the Streamable HTTP UnrealMCP UE plugin",

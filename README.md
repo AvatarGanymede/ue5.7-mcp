@@ -15,19 +15,19 @@ Unreal Editor must remain open with the target project loaded while an MCP clien
 ### For Human
 
 1. Download the named `UnrealMCP-...-UE5.7-Win64-GitHub.zip` asset from [GitHub Releases](https://github.com/AvatarGanymede/ue5.7-mcp/releases). Do not use GitHub's automatically generated **Source code** archives as the installer.
-2. Close Unreal Editor. When upgrading, replace the complete existing `Plugins/UnrealMCP` directory instead of merging files into an older installation.
+2. Close Unreal Editor. When upgrading, replace the complete existing `Plugins/ModelContextProtocol` directory instead of merging files into an older installation. For upgrades from 0.3.x or earlier, remove the legacy `Plugins/UnrealMCP` directory; never keep both plugin identifiers installed.
 3. Extract the ZIP into the UE project root, next to the `.uproject` file. The final layout must be:
 
    ```text
    <Project>/
    ├─ <Project>.uproject
    └─ Plugins/
-      └─ UnrealMCP/
-         ├─ UnrealMCP.uplugin
-         └─ Binaries/Win64/UnrealEditor-UnrealMCP.dll
+      └─ ModelContextProtocol/
+         ├─ ModelContextProtocol.uplugin
+         └─ Binaries/Win64/UnrealEditor-ModelContextProtocol.dll
    ```
 
-4. Open the project, enable **Minimal MCP for Unreal Editor** and **Python Editor Script Plugin** under **Edit → Plugins**, then restart Unreal Editor.
+4. Open the project, enable **MCP for Unreal Editor** and **Python Editor Script Plugin** under **Edit → Plugins**, then restart Unreal Editor.
 5. Add the MCP endpoint to Codex:
 
    ```powershell
@@ -51,18 +51,11 @@ When installing UnrealMCP for a user, follow this procedure:
 1. Locate the target project root by finding its `.uproject` file. Use a project-local installation unless the user explicitly requests an engine-wide installation.
 2. Obtain the latest named release asset matching `UnrealMCP-*-UE5.7-Win64-GitHub.zip`. Never substitute GitHub's automatic source archive.
 3. Ask the user to close Unreal Editor before replacing binaries. Do not overwrite an active plugin installation.
-4. Inspect the archive before extraction and verify that it contains `Plugins/UnrealMCP/UnrealMCP.uplugin` and `Plugins/UnrealMCP/Binaries/Win64/UnrealEditor-UnrealMCP.dll`.
-5. Replace the complete `<Project>/Plugins/UnrealMCP` directory with the archive's plugin directory. Preserve unrelated plugins and project files.
-6. Add or merge the following MCP configuration without overwriting unrelated Codex settings:
-
-   ```toml
-   [mcp_servers.unreal]
-   url = "http://127.0.0.1:18777/mcp"
-   tool_timeout_sec = 3600
-   ```
-
-7. Tell the user to enable **Minimal MCP for Unreal Editor** and **Python Editor Script Plugin**, then restart Unreal Editor and Codex.
-8. After both applications restart, call:
+4. Inspect the archive before extraction and verify that it contains `Plugins/ModelContextProtocol/ModelContextProtocol.uplugin` and `Plugins/ModelContextProtocol/Binaries/Win64/UnrealEditor-ModelContextProtocol.dll`.
+5. Replace the complete `<Project>/Plugins/ModelContextProtocol` directory with the archive's plugin directory. When migrating from 0.3.x or earlier, remove `<Project>/Plugins/UnrealMCP` so the legacy and new plugin identifiers cannot load together. Preserve unrelated plugins and project files.
+6. Following the current agent's own MCP configuration conventions, register a Streamable HTTP server named `unreal` with URL `http://127.0.0.1:18777/mcp` in that agent's **project-scoped MCP list**. Do not register it at user or global scope, and do not overwrite unrelated project MCP entries. Set the tool timeout to 3600 seconds if the agent supports that setting.
+7. Tell the user to enable **MCP for Unreal Editor** and **Python Editor Script Plugin**, then restart Unreal Editor.
+8. After Unreal Editor restarts, call:
 
    ```json
    { "action": "health" }
@@ -126,5 +119,9 @@ For long-running work, set `"run": "async"`; the response returns a `task_id`. I
 ```json
 { "action": "task", "command": "get", "task_id": "<uuid>" }
 ```
+
+Async batches execute one command per Game Thread tick. Their 300-second wall-clock limit and cooperative cancellation are checked only between commands; an in-flight Python or console command is never interrupted. `transaction: true` records each command separately for Undo and is not an atomic batch—failure, timeout, or cancellation does not roll back commands that already finished.
+
+The server validates tool arguments against the published JSON Schema and applies fixed safety limits: 4 MiB request and response bodies, 64 queued HTTP requests, 4096-character discovery queries, 100 commands per batch, 128 tasks per MCP session/client, and 1024 tasks globally. Async task list/get/cancel operations are isolated by `Mcp-Session-Id` (or the client identity fallback when no MCP session header is available).
 
 The discovery catalog covers editor and asset operations, Blueprints, AI and navigation, animation, automation, configuration, conversations, Data Registry, Dataflow, Game Features, Gameplay Tags and GAS, Niagara, PCG, physics, plugins, semantic search, Slate, StateTree, UMG, World Conditions, and project-specific reflected APIs such as UnLua. Availability depends on the corresponding UE 5.7 or project plugin being enabled.

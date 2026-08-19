@@ -29,10 +29,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $descriptor = Get-Content -LiteralPath 'UnrealMCP/UnrealMCP.uplugin' -Raw | ConvertFrom-Json
+          $descriptor = Get-Content -LiteralPath 'ModelContextProtocol/ModelContextProtocol.uplugin' -Raw | ConvertFrom-Json
           $version = [string]$descriptor.VersionName
           if ($version -notmatch '^\d+\.\d+\.\d+$') {
-            throw "UnrealMCP.uplugin VersionName must use MAJOR.MINOR.PATCH: $version"
+            throw "ModelContextProtocol.uplugin VersionName must use MAJOR.MINOR.PATCH: $version"
           }
 
           $tag = "v$version"
@@ -66,8 +66,8 @@ jobs:
           }
 
           $requiredBinaries = @(
-            'UnrealMCP/Binaries/Win64/UnrealEditor-UnrealMCP.dll',
-            'UnrealMCP/Binaries/Win64/UnrealEditor.modules'
+            'ModelContextProtocol/Binaries/Win64/UnrealEditor-ModelContextProtocol.dll',
+            'ModelContextProtocol/Binaries/Win64/UnrealEditor.modules'
           )
           foreach ($path in $requiredBinaries) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {

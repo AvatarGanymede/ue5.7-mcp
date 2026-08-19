@@ -10,7 +10,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
-$plugin = Join-Path $repositoryRoot 'UnrealMCP\UnrealMCP.uplugin'
+$plugin = Join-Path $repositoryRoot 'ModelContextProtocol\ModelContextProtocol.uplugin'
 $uat = Join-Path $EngineRoot 'Engine\Build\BatchFiles\RunUAT.bat'
 
 if (-not (Test-Path -LiteralPath $plugin -PathType Leaf)) {

@@ -12,7 +12,7 @@ $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 $editor = Join-Path $EngineRoot 'Engine\Binaries\Win64\UnrealEditor-Cmd.exe'
 $stagingRoot = Join-Path $env:TEMP ('UnrealMCP-E2E-' + [guid]::NewGuid().ToString('N'))
-$pluginPackage = Join-Path $stagingRoot 'UnrealMCP'
+$pluginPackage = Join-Path $stagingRoot 'ModelContextProtocol'
 $project = Join-Path $stagingRoot 'UE57MCPTest.uproject'
 
 if (-not (Test-Path -LiteralPath $editor -PathType Leaf)) {
@@ -32,7 +32,7 @@ try {
         Description = 'Generated host for the UnrealMCP Streamable HTTP end-to-end test.'
         AdditionalPluginDirectories = @($pluginPackage)
         Plugins = @(
-            [ordered]@{ Name = 'UnrealMCP'; Enabled = $true },
+            [ordered]@{ Name = 'ModelContextProtocol'; Enabled = $true },
             [ordered]@{ Name = 'PythonScriptPlugin'; Enabled = $true }
         )
     }
@@ -190,4 +190,3 @@ finally {
         }
     }
 }
-

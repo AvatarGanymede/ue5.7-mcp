@@ -1,6 +1,7 @@
 #include "UnrealMCPServer.h"
 
 #include "Async/Async.h"
+#include "Containers/Ticker.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
 #include "Editor.h"
@@ -24,13 +25,17 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 
-DEFINE_LOG_CATEGORY(LogUnrealMCP)
+DEFINE_LOG_CATEGORY(LogModelContextProtocol)
 
 namespace
 {
     constexpr int32 MaxRequestBytes = 4 * 1024 * 1024;
+    constexpr int32 MaxResponseBytes = 4 * 1024 * 1024;
+    constexpr int32 MaxQueuedRequests = 64;
     constexpr int32 MaxCommands = 100;
-    constexpr int32 MaxTasks = 128;
+    constexpr int32 MaxTasksPerOwner = 128;
+    constexpr int32 MaxTasks = 1024;
+    constexpr double MaxExecutionSeconds = 300.0;
     const TCHAR* LatestProtocolVersion = TEXT("2026-07-28");
     const TCHAR* ServerInstructions =
         TEXT("One tool is exposed. Use action=discover for unfamiliar Unreal APIs, then action=execute with a compact ")
@@ -39,7 +44,7 @@ namespace
 
     FString ServerVersion()
     {
-        const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMCP"));
+        const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("ModelContextProtocol"));
         return Plugin.IsValid() ? Plugin->GetDescriptor().VersionName : TEXT("unknown");
     }
 
@@ -113,6 +118,213 @@ namespace
         }
         return FString();
     }
+
+    bool MatchesSchemaType(const TSharedPtr<FJsonValue>& Value, const FString& Type)
+    {
+        if (!Value)
+        {
+            return false;
+        }
+        if (Type == TEXT("null")) return Value->IsNull();
+        if (Type == TEXT("object")) return Value->Type == EJson::Object;
+        if (Type == TEXT("array")) return Value->Type == EJson::Array;
+        if (Type == TEXT("string")) return Value->Type == EJson::String;
+        if (Type == TEXT("boolean")) return Value->Type == EJson::Boolean;
+        if (Type == TEXT("number")) return Value->Type == EJson::Number;
+        if (Type == TEXT("integer"))
+        {
+            return Value->Type == EJson::Number
+                && Value->AsNumber() == FMath::TruncToDouble(Value->AsNumber());
+        }
+        return false;
+    }
+
+    bool ValidateJsonSchema(
+        const TSharedPtr<FJsonValue>& Value,
+        const TSharedPtr<FJsonObject>& Schema,
+        const FString& Path,
+        FString& OutError)
+    {
+        if (!Value || !Schema)
+        {
+            OutError = FString::Printf(TEXT("%s has no value or schema"), *Path);
+            return false;
+        }
+
+        const TArray<TSharedPtr<FJsonValue>>* OneOf = nullptr;
+        if (Schema->TryGetArrayField(TEXT("oneOf"), OneOf) && OneOf)
+        {
+            int32 Matches = 0;
+            FString FirstError;
+            for (const TSharedPtr<FJsonValue>& Candidate : *OneOf)
+            {
+                const TSharedPtr<FJsonObject> CandidateSchema = Candidate ? Candidate->AsObject() : nullptr;
+                FString CandidateError;
+                if (CandidateSchema && ValidateJsonSchema(Value, CandidateSchema, Path, CandidateError))
+                {
+                    ++Matches;
+                }
+                else if (FirstError.IsEmpty())
+                {
+                    FirstError = MoveTemp(CandidateError);
+                }
+            }
+            if (Matches != 1)
+            {
+                OutError = Matches == 0 && !FirstError.IsEmpty()
+                    ? MoveTemp(FirstError)
+                    : FString::Printf(TEXT("%s must match exactly one schema branch (matched %d)"), *Path, Matches);
+                return false;
+            }
+        }
+
+        FString Type;
+        if (Schema->TryGetStringField(TEXT("type"), Type) && !MatchesSchemaType(Value, Type))
+        {
+            OutError = FString::Printf(TEXT("%s must be of type %s"), *Path, *Type);
+            return false;
+        }
+
+        const TSharedPtr<FJsonValue> ConstValue = Schema->TryGetField(TEXT("const"));
+        if (ConstValue && !FJsonValue::CompareEqual(*Value, *ConstValue))
+        {
+            OutError = FString::Printf(TEXT("%s does not match its required constant"), *Path);
+            return false;
+        }
+
+        const TArray<TSharedPtr<FJsonValue>>* EnumValues = nullptr;
+        if (Schema->TryGetArrayField(TEXT("enum"), EnumValues) && EnumValues)
+        {
+            const bool bMatchesEnum = EnumValues->ContainsByPredicate([&Value](const TSharedPtr<FJsonValue>& Candidate)
+            {
+                return Candidate && FJsonValue::CompareEqual(*Value, *Candidate);
+            });
+            if (!bMatchesEnum)
+            {
+                OutError = FString::Printf(TEXT("%s is not an allowed value"), *Path);
+                return false;
+            }
+        }
+
+        if (Value->Type == EJson::Object)
+        {
+            const TSharedPtr<FJsonObject> Object = Value->AsObject();
+            const TArray<TSharedPtr<FJsonValue>>* Required = nullptr;
+            if (Schema->TryGetArrayField(TEXT("required"), Required) && Required)
+            {
+                for (const TSharedPtr<FJsonValue>& RequiredValue : *Required)
+                {
+                    FString RequiredName;
+                    if (RequiredValue && RequiredValue->TryGetString(RequiredName) && !Object->HasField(RequiredName))
+                    {
+                        OutError = FString::Printf(TEXT("%s.%s is required"), *Path, *RequiredName);
+                        return false;
+                    }
+                }
+            }
+
+            const TSharedPtr<FJsonObject>* Properties = nullptr;
+            Schema->TryGetObjectField(TEXT("properties"), Properties);
+            for (const TPair<FString, TSharedPtr<FJsonValue>>& Field : Object->Values)
+            {
+                const TSharedPtr<FJsonValue> PropertySchemaValue =
+                    Properties && Properties->IsValid() ? (*Properties)->TryGetField(Field.Key) : nullptr;
+                if (PropertySchemaValue)
+                {
+                    const TSharedPtr<FJsonObject> PropertySchema = PropertySchemaValue->AsObject();
+                    if (!PropertySchema || !ValidateJsonSchema(
+                        Field.Value, PropertySchema, Path + TEXT(".") + Field.Key, OutError))
+                    {
+                        return false;
+                    }
+                }
+                else
+                {
+                    bool bAdditionalProperties = true;
+                    if (Schema->TryGetBoolField(TEXT("additionalProperties"), bAdditionalProperties)
+                        && !bAdditionalProperties)
+                    {
+                        OutError = FString::Printf(TEXT("%s.%s is not allowed"), *Path, *Field.Key);
+                        return false;
+                    }
+                }
+            }
+        }
+
+        if (Value->Type == EJson::Array)
+        {
+            const TArray<TSharedPtr<FJsonValue>>& Values = Value->AsArray();
+            int32 Minimum = 0;
+            int32 Maximum = 0;
+            if (Schema->TryGetNumberField(TEXT("minItems"), Minimum) && Values.Num() < Minimum)
+            {
+                OutError = FString::Printf(TEXT("%s must contain at least %d items"), *Path, Minimum);
+                return false;
+            }
+            if (Schema->TryGetNumberField(TEXT("maxItems"), Maximum) && Values.Num() > Maximum)
+            {
+                OutError = FString::Printf(TEXT("%s must contain at most %d items"), *Path, Maximum);
+                return false;
+            }
+            const TSharedPtr<FJsonObject>* ItemSchema = nullptr;
+            if (Schema->TryGetObjectField(TEXT("items"), ItemSchema) && ItemSchema && ItemSchema->IsValid())
+            {
+                for (int32 Index = 0; Index < Values.Num(); ++Index)
+                {
+                    if (!ValidateJsonSchema(
+                        Values[Index], *ItemSchema, FString::Printf(TEXT("%s[%d]"), *Path, Index), OutError))
+                    {
+                        return false;
+                    }
+                }
+            }
+        }
+
+        if (Value->Type == EJson::String)
+        {
+            const FString StringValue = Value->AsString();
+            int32 Minimum = 0;
+            int32 Maximum = 0;
+            if (Schema->TryGetNumberField(TEXT("minLength"), Minimum) && StringValue.Len() < Minimum)
+            {
+                OutError = FString::Printf(TEXT("%s must contain at least %d characters"), *Path, Minimum);
+                return false;
+            }
+            if (Schema->TryGetNumberField(TEXT("maxLength"), Maximum) && StringValue.Len() > Maximum)
+            {
+                OutError = FString::Printf(TEXT("%s must contain at most %d characters"), *Path, Maximum);
+                return false;
+            }
+            FString Format;
+            if (Schema->TryGetStringField(TEXT("format"), Format) && Format == TEXT("uuid"))
+            {
+                FGuid Guid;
+                if (!FGuid::Parse(StringValue, Guid)
+                    || !Guid.ToString(EGuidFormats::DigitsWithHyphensLower).Equals(StringValue, ESearchCase::IgnoreCase))
+                {
+                    OutError = FString::Printf(TEXT("%s must be a UUID"), *Path);
+                    return false;
+                }
+            }
+        }
+
+        if (Value->Type == EJson::Number)
+        {
+            double Minimum = 0.0;
+            double Maximum = 0.0;
+            if (Schema->TryGetNumberField(TEXT("minimum"), Minimum) && Value->AsNumber() < Minimum)
+            {
+                OutError = FString::Printf(TEXT("%s must be at least %g"), *Path, Minimum);
+                return false;
+            }
+            if (Schema->TryGetNumberField(TEXT("maximum"), Maximum) && Value->AsNumber() > Maximum)
+            {
+                OutError = FString::Printf(TEXT("%s must be at most %g"), *Path, Maximum);
+                return false;
+            }
+        }
+        return true;
+    }
 }
 
 bool FUnrealMCPServer::Start()
@@ -125,6 +337,8 @@ bool FUnrealMCPServer::Start()
     {
         return false;
     }
+    Lifetime = MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(true);
+    RequestQueueDepth = MakeShared<FThreadSafeCounter, ESPMode::ThreadSafe>();
 
     FString PortValue = FPlatformMisc::GetEnvironmentVariable(TEXT("UE_MCP_PORT"));
     if (PortValue.IsEmpty())
@@ -136,7 +350,7 @@ bool FUnrealMCPServer::Start()
         const int32 ParsedPort = FCString::Atoi(*PortValue);
         if (ParsedPort <= 0 || ParsedPort > 65535)
         {
-            UE_LOG(LogUnrealMCP, Error, TEXT("Invalid UE_MCP_PORT '%s'"), *PortValue);
+            UE_LOG(LogModelContextProtocol, Error, TEXT("Invalid UE_MCP_PORT '%s'"), *PortValue);
             return false;
         }
         Port = static_cast<uint32>(ParsedPort);
@@ -163,26 +377,27 @@ bool FUnrealMCPServer::Start()
     Router = HttpServer.GetHttpRouter(Port, true);
     if (!Router)
     {
-        UE_LOG(LogUnrealMCP, Error, TEXT("Unable to bind MCP server on 127.0.0.1:%u"), Port);
+        UE_LOG(LogModelContextProtocol, Error, TEXT("Unable to bind MCP server on 127.0.0.1:%u"), Port);
+        Stop();
         return false;
     }
 
     McpPostRoute = Router->BindRoute(
         FHttpPath(EndpointPath),
         EHttpServerRequestVerbs::VERB_POST,
-        FHttpRequestHandler::CreateRaw(this, &FUnrealMCPServer::HandleMcpPost));
+        FHttpRequestHandler::CreateSP(AsShared(), &FUnrealMCPServer::HandleMcpPost));
     McpGetRoute = Router->BindRoute(
         FHttpPath(EndpointPath),
         EHttpServerRequestVerbs::VERB_GET,
-        FHttpRequestHandler::CreateRaw(this, &FUnrealMCPServer::HandleMcpGet));
+        FHttpRequestHandler::CreateSP(AsShared(), &FUnrealMCPServer::HandleMcpGet));
     McpOptionsRoute = Router->BindRoute(
         FHttpPath(EndpointPath),
         EHttpServerRequestVerbs::VERB_OPTIONS,
-        FHttpRequestHandler::CreateRaw(this, &FUnrealMCPServer::HandleMcpOptions));
+        FHttpRequestHandler::CreateSP(AsShared(), &FUnrealMCPServer::HandleMcpOptions));
 
     if (!McpPostRoute || !McpGetRoute || !McpOptionsRoute)
     {
-        UE_LOG(LogUnrealMCP, Error, TEXT("Unable to register MCP HTTP routes"));
+        UE_LOG(LogModelContextProtocol, Error, TEXT("Unable to register MCP HTTP routes"));
         Stop();
         return false;
     }
@@ -190,7 +405,7 @@ bool FUnrealMCPServer::Start()
     HttpServer.StartAllListeners();
     bStarted = true;
     UE_LOG(
-        LogUnrealMCP,
+        LogModelContextProtocol,
         Log,
         TEXT("Unreal MCP listening on http://127.0.0.1:%u%s (Streamable HTTP, token authentication: %s)"),
         Port,
@@ -198,13 +413,17 @@ bool FUnrealMCPServer::Start()
         Token.IsEmpty() ? TEXT("disabled") : TEXT("enabled"));
     if (Token.IsEmpty())
     {
-        UE_LOG(LogUnrealMCP, Warning, TEXT("Set UE_MCP_TOKEN before launching the editor to require bearer authentication."));
+        UE_LOG(LogModelContextProtocol, Warning, TEXT("Set UE_MCP_TOKEN before launching the editor to require bearer authentication."));
     }
     return true;
 }
 
 void FUnrealMCPServer::Stop()
 {
+    if (Lifetime)
+    {
+        Lifetime->AtomicSet(false);
+    }
     if (Router)
     {
         if (McpPostRoute)
@@ -225,6 +444,7 @@ void FUnrealMCPServer::Stop()
     }
     Router.Reset();
     Tasks.Empty();
+    ActiveOwnerId.Reset();
     Metadata.Reset();
     bStarted = false;
 }
@@ -257,15 +477,42 @@ bool FUnrealMCPServer::HandleMcpPost(const FHttpServerRequest& Request, const FH
         return true;
     }
 
+    FString OwnerId = RequestOwnerId(Request);
     if (IsInGameThread())
     {
-        ProcessRequestOnGameThread(MoveTemp(Body), OnComplete);
+        ProcessRequestOnGameThread(MoveTemp(Body), MoveTemp(OwnerId), OnComplete);
     }
     else
     {
-        AsyncTask(ENamedThreads::GameThread, [this, Body = MoveTemp(Body), OnComplete]() mutable
+        const TSharedPtr<FThreadSafeCounter, ESPMode::ThreadSafe> QueueDepth = RequestQueueDepth;
+        if (!QueueDepth || QueueDepth->Increment() > MaxQueuedRequests)
         {
-            ProcessRequestOnGameThread(MoveTemp(Body), OnComplete);
+            if (QueueDepth)
+            {
+                QueueDepth->Decrement();
+            }
+            TUniquePtr<FHttpServerResponse> Response = HttpErrorResponse(
+                EHttpServerResponseCodes::TooManyRequests,
+                TEXT("request_queue_full"),
+                TEXT("The MCP request queue is full; retry later."));
+            Response->Headers.Add(TEXT("Retry-After"), { TEXT("1") });
+            OnComplete(MoveTemp(Response));
+            return true;
+        }
+        const TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> RequestLifetime = Lifetime;
+        AsyncTask(ENamedThreads::GameThread, [this, RequestLifetime, QueueDepth, Body = MoveTemp(Body), OwnerId = MoveTemp(OwnerId), OnComplete]() mutable
+        {
+            QueueDepth->Decrement();
+            if (!RequestLifetime || !static_cast<bool>(*RequestLifetime))
+            {
+                TUniquePtr<FHttpServerResponse> Response = FHttpServerResponse::Create(
+                    TEXT("{\"ok\":false,\"error\":\"server_stopping\"}"),
+                    TEXT("application/json; charset=utf-8"));
+                Response->Code = EHttpServerResponseCodes::BadRequest;
+                OnComplete(MoveTemp(Response));
+                return;
+            }
+            ProcessRequestOnGameThread(MoveTemp(Body), MoveTemp(OwnerId), OnComplete);
         });
     }
     return true;
@@ -280,7 +527,10 @@ bool FUnrealMCPServer::HandleMcpGet(const FHttpServerRequest& Request, const FHt
     }
     if (!IsAuthorized(Request))
     {
-        OnComplete(HttpErrorResponse(EHttpServerResponseCodes::Denied, TEXT("unauthorized"), TEXT("Missing or invalid bearer token.")));
+        TUniquePtr<FHttpServerResponse> Response =
+            HttpErrorResponse(EHttpServerResponseCodes::Denied, TEXT("unauthorized"), TEXT("Missing or invalid bearer token."));
+        Response->Headers.Add(TEXT("WWW-Authenticate"), { TEXT("Bearer") });
+        OnComplete(MoveTemp(Response));
         return true;
     }
     OnComplete(HttpErrorResponse(
@@ -290,22 +540,30 @@ bool FUnrealMCPServer::HandleMcpGet(const FHttpServerRequest& Request, const FHt
     return true;
 }
 
-bool FUnrealMCPServer::HandleMcpOptions(const FHttpServerRequest&, const FHttpResultCallback& OnComplete)
+bool FUnrealMCPServer::HandleMcpOptions(const FHttpServerRequest& Request, const FHttpResultCallback& OnComplete)
 {
+    if (!IsOriginAllowed(Request))
+    {
+        OnComplete(HttpErrorResponse(EHttpServerResponseCodes::Forbidden, TEXT("invalid_origin"), TEXT("Origin must be localhost.")));
+        return true;
+    }
     TUniquePtr<FHttpServerResponse> Response = EmptyResponse(EHttpServerResponseCodes::NoContent);
     Response->Headers.Add(TEXT("Allow"), { TEXT("POST, GET, OPTIONS") });
     OnComplete(MoveTemp(Response));
     return true;
 }
 
-void FUnrealMCPServer::ProcessRequestOnGameThread(FString Body, FHttpResultCallback OnComplete)
+void FUnrealMCPServer::ProcessRequestOnGameThread(FString Body, FString OwnerId, FHttpResultCallback OnComplete)
 {
     check(IsInGameThread());
     TSharedPtr<FJsonObject> Request;
     const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Body);
     if (!FJsonSerializer::Deserialize(Reader, Request) || !Request)
     {
-        OnComplete(JsonResponse(JsonRpcError(nullptr, -32700, TEXT("Parse error")), EHttpServerResponseCodes::BadRequest));
+        TUniquePtr<FHttpServerResponse> Response =
+            JsonResponse(JsonRpcError(nullptr, -32700, TEXT("Parse error")), EHttpServerResponseCodes::BadRequest);
+        Response->Headers.Add(TEXT("Mcp-Session-Id"), { OwnerId });
+        OnComplete(MoveTemp(Response));
         return;
     }
 
@@ -313,10 +571,16 @@ void FUnrealMCPServer::ProcessRequestOnGameThread(FString Body, FHttpResultCallb
     if (!Id || Id->IsNull())
     {
         // Streamable HTTP acknowledges JSON-RPC notifications without a body.
-        OnComplete(EmptyResponse(EHttpServerResponseCodes::Accepted));
+        TUniquePtr<FHttpServerResponse> Response = EmptyResponse(EHttpServerResponseCodes::Accepted);
+        Response->Headers.Add(TEXT("Mcp-Session-Id"), { OwnerId });
+        OnComplete(MoveTemp(Response));
         return;
     }
-    OnComplete(JsonResponse(ProcessJsonRpc(Request.ToSharedRef())));
+    ActiveOwnerId = OwnerId;
+    TUniquePtr<FHttpServerResponse> Response = JsonResponse(ProcessJsonRpc(Request.ToSharedRef()));
+    ActiveOwnerId.Reset();
+    Response->Headers.Add(TEXT("Mcp-Session-Id"), { OwnerId });
+    OnComplete(MoveTemp(Response));
 }
 
 TSharedRef<FJsonObject> FUnrealMCPServer::ProcessJsonRpc(const TSharedRef<FJsonObject>& Request)
@@ -441,7 +705,18 @@ TSharedRef<FJsonObject> FUnrealMCPServer::ToolsCallResult(const TSharedRef<FJson
         }
         else
         {
-            Payload = HandleAction(Arguments->ToSharedRef());
+            const TSharedPtr<FJsonObject> Tool = Metadata->GetObjectField(TEXT("tool"));
+            const TSharedPtr<FJsonObject> InputSchema = Tool->GetObjectField(TEXT("inputSchema"));
+            FString ValidationError;
+            if (!ValidateJsonSchema(
+                MakeShared<FJsonValueObject>(*Arguments), InputSchema, TEXT("arguments"), ValidationError))
+            {
+                Payload = ErrorPayload(TEXT("Invalid arguments: ") + ValidationError);
+            }
+            else
+            {
+                Payload = HandleAction(Arguments->ToSharedRef());
+            }
         }
     }
 
@@ -509,42 +784,56 @@ TSharedRef<FJsonObject> FUnrealMCPServer::HandleAction(const TSharedRef<FJsonObj
             }
             if (Tasks.Num() >= MaxTasks)
             {
-                return ErrorPayload(TEXT("task store is full; wait for running tasks to finish"));
+                return ErrorPayload(TEXT("global task store is full; wait for running tasks to finish"));
+            }
+
+            int32 OwnerTaskCount = 0;
+            for (const TPair<FString, FTaskState>& Entry : Tasks)
+            {
+                OwnerTaskCount += Entry.Value.OwnerId == ActiveOwnerId ? 1 : 0;
+            }
+            if (OwnerTaskCount >= MaxTasksPerOwner)
+            {
+                TArray<FString> CompletedIds;
+                for (const TPair<FString, FTaskState>& Entry : Tasks)
+                {
+                    if (Entry.Value.OwnerId == ActiveOwnerId && Entry.Value.State != TEXT("running"))
+                    {
+                        CompletedIds.Add(Entry.Key);
+                    }
+                }
+                for (const FString& Id : CompletedIds)
+                {
+                    Tasks.Remove(Id);
+                    if (--OwnerTaskCount < MaxTasksPerOwner)
+                    {
+                        break;
+                    }
+                }
+            }
+            if (OwnerTaskCount >= MaxTasksPerOwner)
+            {
+                return ErrorPayload(TEXT("task store is full for this MCP session; wait for running tasks to finish"));
             }
 
             FTaskState Task;
             Task.Id = FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphensLower);
+            Task.OwnerId = ActiveOwnerId;
             Task.CreatedAt = UtcTimestamp();
             Task.UpdatedAt = Task.CreatedAt;
+            Task.Arguments = Arguments;
+            Task.StartedAtSeconds = FPlatformTime::Seconds();
             const FString TaskId = Task.Id;
             Tasks.Add(TaskId, Task);
 
-            AsyncTask(ENamedThreads::GameThread, [this, TaskId, Arguments]()
+            const TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> TaskLifetime = Lifetime;
+            AsyncTask(ENamedThreads::GameThread, [this, TaskLifetime, TaskId]()
             {
-                FTaskState* Existing = Tasks.Find(TaskId);
-                if (!Existing || Existing->State == TEXT("cancelled"))
+                if (!TaskLifetime || !static_cast<bool>(*TaskLifetime))
                 {
                     return;
                 }
-                const TSharedRef<FJsonObject> Payload = ExecuteCommands(Arguments);
-                Existing = Tasks.Find(TaskId);
-                if (!Existing || Existing->State == TEXT("cancelled"))
-                {
-                    return;
-                }
-                bool bOk = false;
-                Payload->TryGetBoolField(TEXT("ok"), bOk);
-                Existing->UpdatedAt = UtcTimestamp();
-                Existing->State = bOk ? TEXT("succeeded") : TEXT("failed");
-                const TSharedPtr<FJsonObject>* Data = nullptr;
-                if (Payload->TryGetObjectField(TEXT("data"), Data) && Data && Data->IsValid())
-                {
-                    Existing->Result = *Data;
-                }
-                if (!bOk)
-                {
-                    Payload->TryGetStringField(TEXT("error"), Existing->Error);
-                }
+                RunNextTaskCommand(TaskId);
             });
 
             TSharedRef<FJsonObject> Data = MakeShared<FJsonObject>();
@@ -677,118 +966,237 @@ TSharedRef<FJsonObject> FUnrealMCPServer::ExecuteCommands(const TSharedRef<FJson
     Arguments->TryGetBoolField(TEXT("transaction"), bUseTransaction);
     Arguments->TryGetBoolField(TEXT("continue_on_error"), bContinueOnError);
 
-    TUniquePtr<FScopedTransaction> Transaction;
-    if (bUseTransaction)
-    {
-        Transaction = MakeUnique<FScopedTransaction>(NSLOCTEXT("UnrealMCP", "BatchTransaction", "MCP command batch"));
-    }
-
     bool bAllSucceeded = true;
+    bool bTimedOut = false;
     TArray<TSharedPtr<FJsonValue>> ResultValues;
     ResultValues.Reserve(Commands->Num());
     for (int32 Index = 0; Index < Commands->Num(); ++Index)
     {
-        const TSharedPtr<FJsonObject> CommandObject = (*Commands)[Index]->AsObject();
-        if (!CommandObject)
+        if ((FPlatformTime::Seconds() - StartedAt) >= MaxExecutionSeconds)
         {
             TSharedRef<FJsonObject> Result = MakeCommandResult(Index, TEXT("unknown"), FString(), false);
-            Result->SetStringField(TEXT("error"), TEXT("Command must be a JSON object."));
+            Result->SetStringField(TEXT("error"), TEXT("Execution time limit exceeded (300 seconds)."));
             ResultValues.Add(MakeShared<FJsonValueObject>(Result));
             bAllSucceeded = false;
-            if (!bContinueOnError) break;
-            continue;
+            bTimedOut = true;
+            break;
         }
 
-        FString Kind;
-        FString Label;
-        CommandObject->TryGetStringField(TEXT("kind"), Kind);
-        CommandObject->TryGetStringField(TEXT("label"), Label);
-        if (Kind.Equals(TEXT("python"), ESearchCase::IgnoreCase))
+        bool bSucceeded = false;
+        ResultValues.Add(MakeShared<FJsonValueObject>(
+            ExecuteCommand((*Commands)[Index], Index, bUseTransaction, bSucceeded)));
+        bAllSucceeded &= bSucceeded;
+        if ((FPlatformTime::Seconds() - StartedAt) >= MaxExecutionSeconds)
         {
-            FString Code;
-            FString Mode = TEXT("exec");
-            CommandObject->TryGetStringField(TEXT("code"), Code);
-            CommandObject->TryGetStringField(TEXT("mode"), Mode);
-            IPythonScriptPlugin* Python = FModuleManager::LoadModulePtr<IPythonScriptPlugin>(TEXT("PythonScriptPlugin"));
-            if (Python && !Python->IsPythonInitialized())
-            {
-                Python->ForceEnablePythonAtRuntime();
-            }
-
-            FPythonCommandEx PythonCommand;
-            PythonCommand.Flags = EPythonCommandFlags::Unattended;
-            PythonCommand.FileExecutionScope = EPythonFileExecutionScope::Private;
-            PythonCommand.ExecutionMode = Mode.Equals(TEXT("eval"), ESearchCase::IgnoreCase)
-                ? EPythonCommandExecutionMode::EvaluateStatement
-                : EPythonCommandExecutionMode::ExecuteFile;
-            PythonCommand.Command = MoveTemp(Code);
-            const bool bSuccess = Python && Python->IsPythonInitialized() && Python->ExecPythonCommandEx(PythonCommand);
-
-            TSharedRef<FJsonObject> Result = MakeCommandResult(Index, TEXT("python"), Label, bSuccess);
-            Result->SetStringField(TEXT("result"), PythonCommand.CommandResult);
-            TArray<TSharedPtr<FJsonValue>> Logs;
-            for (const FPythonLogOutputEntry& Log : PythonCommand.LogOutput)
-            {
-                TSharedRef<FJsonObject> LogObject = MakeShared<FJsonObject>();
-                LogObject->SetStringField(TEXT("level"), LexToString(Log.Type));
-                LogObject->SetStringField(TEXT("message"), Log.Output);
-                Logs.Add(MakeShared<FJsonValueObject>(LogObject));
-            }
-            Result->SetArrayField(TEXT("logs"), MoveTemp(Logs));
-            if (!Python)
-            {
-                Result->SetStringField(TEXT("error"), TEXT("PythonScriptPlugin is unavailable."));
-            }
-            ResultValues.Add(MakeShared<FJsonValueObject>(Result));
-            bAllSucceeded &= bSuccess;
-            if (!bSuccess && !bContinueOnError) break;
-        }
-        else if (Kind.Equals(TEXT("console"), ESearchCase::IgnoreCase))
-        {
-            FString Command;
-            CommandObject->TryGetStringField(TEXT("command"), Command);
-            FStringOutputDevice Output;
-            UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
-            const bool bSuccess = GEngine && !Command.IsEmpty() && GEngine->Exec(World, *Command, Output);
-            TSharedRef<FJsonObject> Result = MakeCommandResult(Index, TEXT("console"), Label, bSuccess);
-            Result->SetStringField(TEXT("output"), Output);
-            if (!bSuccess)
-            {
-                Result->SetStringField(TEXT("error"), TEXT("Console command was empty, unavailable, or unhandled."));
-            }
-            ResultValues.Add(MakeShared<FJsonValueObject>(Result));
-            bAllSucceeded &= bSuccess;
-            if (!bSuccess && !bContinueOnError) break;
-        }
-        else
-        {
-            TSharedRef<FJsonObject> Result = MakeCommandResult(Index, Kind, Label, false);
-            Result->SetStringField(TEXT("error"), TEXT("Unsupported command kind. Expected 'python' or 'console'."));
-            ResultValues.Add(MakeShared<FJsonValueObject>(Result));
+            bTimedOut = true;
             bAllSucceeded = false;
-            if (!bContinueOnError) break;
+            break;
+        }
+        if (!bSucceeded && !bContinueOnError)
+        {
+            break;
         }
     }
 
-    if (!bAllSucceeded && Transaction)
-    {
-        Transaction->Cancel();
-    }
-
-    TSharedRef<FJsonObject> Data = MakeShared<FJsonObject>();
-    Data->SetBoolField(TEXT("ok"), bAllSucceeded);
-    Data->SetBoolField(TEXT("game_thread"), true);
-    Data->SetBoolField(TEXT("transaction_recorded"), bAllSucceeded && bUseTransaction);
-    Data->SetNumberField(TEXT("duration_ms"), (FPlatformTime::Seconds() - StartedAt) * 1000.0);
-    Data->SetArrayField(TEXT("results"), MoveTemp(ResultValues));
+    TSharedRef<FJsonObject> Data = MakeExecutionData(
+        ResultValues, bAllSucceeded, bUseTransaction, StartedAt, bTimedOut);
     TSharedRef<FJsonObject> Payload = MakeShared<FJsonObject>();
     Payload->SetBoolField(TEXT("ok"), bAllSucceeded);
     Payload->SetObjectField(TEXT("data"), Data);
     if (!bAllSucceeded)
     {
-        Payload->SetStringField(TEXT("error"), TEXT("One or more commands failed."));
+        Payload->SetStringField(TEXT("error"), bTimedOut
+            ? TEXT("Execution time limit exceeded (300 seconds).")
+            : TEXT("One or more commands failed."));
     }
     return Payload;
+}
+
+TSharedRef<FJsonObject> FUnrealMCPServer::ExecuteCommand(
+    const TSharedPtr<FJsonValue>& CommandValue,
+    int32 Index,
+    bool bUseTransaction,
+    bool& bSucceeded) const
+{
+    check(IsInGameThread());
+    bSucceeded = false;
+    const TSharedPtr<FJsonObject> CommandObject = CommandValue ? CommandValue->AsObject() : nullptr;
+    if (!CommandObject)
+    {
+        TSharedRef<FJsonObject> Result = MakeCommandResult(Index, TEXT("unknown"), FString(), false);
+        Result->SetStringField(TEXT("error"), TEXT("Command must be a JSON object."));
+        return Result;
+    }
+
+    FString Kind;
+    FString Label;
+    CommandObject->TryGetStringField(TEXT("kind"), Kind);
+    CommandObject->TryGetStringField(TEXT("label"), Label);
+
+    // transaction=true records undo per command. It is intentionally not an
+    // atomic batch: later failure or cancellation never rolls back earlier work.
+    TUniquePtr<FScopedTransaction> Transaction;
+    if (bUseTransaction)
+    {
+        Transaction = MakeUnique<FScopedTransaction>(FText::Format(
+            NSLOCTEXT("ModelContextProtocol", "CommandTransaction", "MCP command {0}"),
+            FText::AsNumber(Index + 1)));
+    }
+
+    if (Kind.Equals(TEXT("python"), ESearchCase::IgnoreCase))
+    {
+        FString Code;
+        FString Mode = TEXT("exec");
+        CommandObject->TryGetStringField(TEXT("code"), Code);
+        CommandObject->TryGetStringField(TEXT("mode"), Mode);
+        IPythonScriptPlugin* Python = FModuleManager::LoadModulePtr<IPythonScriptPlugin>(TEXT("PythonScriptPlugin"));
+        if (Python && !Python->IsPythonInitialized())
+        {
+            Python->ForceEnablePythonAtRuntime();
+        }
+
+        FPythonCommandEx PythonCommand;
+        PythonCommand.Flags = EPythonCommandFlags::Unattended;
+        PythonCommand.FileExecutionScope = EPythonFileExecutionScope::Private;
+        PythonCommand.ExecutionMode = Mode.Equals(TEXT("eval"), ESearchCase::IgnoreCase)
+            ? EPythonCommandExecutionMode::EvaluateStatement
+            : EPythonCommandExecutionMode::ExecuteFile;
+        PythonCommand.Command = MoveTemp(Code);
+        bSucceeded = Python && Python->IsPythonInitialized() && Python->ExecPythonCommandEx(PythonCommand);
+
+        TSharedRef<FJsonObject> Result = MakeCommandResult(Index, TEXT("python"), Label, bSucceeded);
+        Result->SetStringField(TEXT("result"), PythonCommand.CommandResult);
+        TArray<TSharedPtr<FJsonValue>> Logs;
+        for (const FPythonLogOutputEntry& Log : PythonCommand.LogOutput)
+        {
+            TSharedRef<FJsonObject> LogObject = MakeShared<FJsonObject>();
+            LogObject->SetStringField(TEXT("level"), LexToString(Log.Type));
+            LogObject->SetStringField(TEXT("message"), Log.Output);
+            Logs.Add(MakeShared<FJsonValueObject>(LogObject));
+        }
+        Result->SetArrayField(TEXT("logs"), MoveTemp(Logs));
+        if (!Python)
+        {
+            Result->SetStringField(TEXT("error"), TEXT("PythonScriptPlugin is unavailable."));
+        }
+        return Result;
+    }
+
+    if (Kind.Equals(TEXT("console"), ESearchCase::IgnoreCase))
+    {
+        FString Command;
+        CommandObject->TryGetStringField(TEXT("command"), Command);
+        FStringOutputDevice Output;
+        UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+        bSucceeded = GEngine && !Command.IsEmpty() && GEngine->Exec(World, *Command, Output);
+        TSharedRef<FJsonObject> Result = MakeCommandResult(Index, TEXT("console"), Label, bSucceeded);
+        Result->SetStringField(TEXT("output"), Output);
+        if (!bSucceeded)
+        {
+            Result->SetStringField(TEXT("error"), TEXT("Console command was empty, unavailable, or unhandled."));
+        }
+        return Result;
+    }
+
+    TSharedRef<FJsonObject> Result = MakeCommandResult(Index, Kind, Label, false);
+    Result->SetStringField(TEXT("error"), TEXT("Unsupported command kind. Expected 'python' or 'console'."));
+    return Result;
+}
+
+TSharedRef<FJsonObject> FUnrealMCPServer::MakeExecutionData(
+    const TArray<TSharedPtr<FJsonValue>>& Results,
+    bool bAllSucceeded,
+    bool bUseTransaction,
+    double StartedAtSeconds,
+    bool bTimedOut) const
+{
+    TSharedRef<FJsonObject> Data = MakeShared<FJsonObject>();
+    Data->SetBoolField(TEXT("ok"), bAllSucceeded);
+    Data->SetBoolField(TEXT("game_thread"), true);
+    Data->SetBoolField(TEXT("transaction_recorded"), bUseTransaction && !Results.IsEmpty());
+    Data->SetBoolField(TEXT("transaction_atomic"), false);
+    Data->SetBoolField(TEXT("transaction_rolled_back"), false);
+    Data->SetBoolField(TEXT("timed_out"), bTimedOut);
+    Data->SetNumberField(TEXT("duration_ms"), (FPlatformTime::Seconds() - StartedAtSeconds) * 1000.0);
+    Data->SetArrayField(TEXT("results"), Results);
+    return Data;
+}
+
+void FUnrealMCPServer::RunNextTaskCommand(FString TaskId)
+{
+    check(IsInGameThread());
+    FTaskState* Task = Tasks.Find(TaskId);
+    if (!Task || Task->State != TEXT("running") || !Task->Arguments)
+    {
+        return;
+    }
+
+    const TArray<TSharedPtr<FJsonValue>>* Commands = nullptr;
+    if (!Task->Arguments->TryGetArrayField(TEXT("commands"), Commands) || !Commands)
+    {
+        FinishTask(*Task, TEXT("failed"), TEXT("commands must be a non-empty array"));
+        return;
+    }
+    if ((FPlatformTime::Seconds() - Task->StartedAtSeconds) >= MaxExecutionSeconds)
+    {
+        FinishTask(*Task, TEXT("timed_out"), TEXT("Execution time limit exceeded (300 seconds)."));
+        return;
+    }
+    if (Task->NextCommandIndex >= Commands->Num())
+    {
+        FinishTask(*Task, Task->bAllSucceeded ? TEXT("succeeded") : TEXT("failed"),
+            Task->bAllSucceeded ? FString() : TEXT("One or more commands failed."));
+        return;
+    }
+
+    bool bUseTransaction = true;
+    bool bContinueOnError = false;
+    Task->Arguments->TryGetBoolField(TEXT("transaction"), bUseTransaction);
+    Task->Arguments->TryGetBoolField(TEXT("continue_on_error"), bContinueOnError);
+
+    const int32 CommandIndex = Task->NextCommandIndex++;
+    bool bSucceeded = false;
+    Task->CommandResults.Add(MakeShared<FJsonValueObject>(
+        ExecuteCommand((*Commands)[CommandIndex], CommandIndex, bUseTransaction, bSucceeded)));
+    Task->bAllSucceeded &= bSucceeded;
+    Task->UpdatedAt = UtcTimestamp();
+    if (!bSucceeded && !bContinueOnError)
+    {
+        FinishTask(*Task, TEXT("failed"), TEXT("One or more commands failed."));
+        return;
+    }
+
+    // Yield after every command. Cancellation and timeout are observed only at
+    // the next command boundary; an in-flight command is never interrupted.
+    const TSharedPtr<FThreadSafeBool, ESPMode::ThreadSafe> TaskLifetime = Lifetime;
+    FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(
+        [this, TaskLifetime, TaskId](float)
+        {
+            if (TaskLifetime && static_cast<bool>(*TaskLifetime))
+            {
+                RunNextTaskCommand(TaskId);
+            }
+            return false;
+        }));
+}
+
+void FUnrealMCPServer::FinishTask(FTaskState& Task, const FString& State, const FString& Error)
+{
+    bool bUseTransaction = true;
+    if (Task.Arguments)
+    {
+        Task.Arguments->TryGetBoolField(TEXT("transaction"), bUseTransaction);
+    }
+    Task.State = State;
+    Task.UpdatedAt = UtcTimestamp();
+    Task.Error = Error;
+    Task.Result = MakeExecutionData(
+        Task.CommandResults,
+        State == TEXT("succeeded"),
+        bUseTransaction,
+        Task.StartedAtSeconds,
+        Error == TEXT("Execution time limit exceeded (300 seconds)."));
+    Task.Arguments.Reset();
 }
 
 TSharedRef<FJsonObject> FUnrealMCPServer::HandleTask(const TSharedRef<FJsonObject>& Arguments)
@@ -803,7 +1211,13 @@ TSharedRef<FJsonObject> FUnrealMCPServer::HandleTask(const TSharedRef<FJsonObjec
     if (Command == TEXT("list"))
     {
         TArray<FTaskState> Ordered;
-        Tasks.GenerateValueArray(Ordered);
+        for (const TPair<FString, FTaskState>& Entry : Tasks)
+        {
+            if (Entry.Value.OwnerId == ActiveOwnerId)
+            {
+                Ordered.Add(Entry.Value);
+            }
+        }
         Ordered.StableSort([](const FTaskState& Left, const FTaskState& Right)
         {
             return Left.CreatedAt > Right.CreatedAt;
@@ -823,6 +1237,10 @@ TSharedRef<FJsonObject> FUnrealMCPServer::HandleTask(const TSharedRef<FJsonObjec
             return ErrorPayload(FString::Printf(TEXT("task_id is required for task.%s"), *Command));
         }
         FTaskState* Task = Tasks.Find(TaskId);
+        if (Task && Task->OwnerId != ActiveOwnerId)
+        {
+            Task = nullptr;
+        }
         if (!Task || (Command != TEXT("get") && Command != TEXT("cancel")))
         {
             return ErrorPayload(Task
@@ -831,8 +1249,7 @@ TSharedRef<FJsonObject> FUnrealMCPServer::HandleTask(const TSharedRef<FJsonObjec
         }
         if (Command == TEXT("cancel") && Task->State == TEXT("running"))
         {
-            Task->State = TEXT("cancelled");
-            Task->UpdatedAt = UtcTimestamp();
+            FinishTask(*Task, TEXT("cancelled"), TEXT("Cancelled between commands."));
         }
         Data->SetObjectField(TEXT("task"), TaskSnapshot(*Task));
     }
@@ -925,17 +1342,17 @@ bool FUnrealMCPServer::IsModernRequest(const TSharedRef<FJsonObject>& Request) c
 
 bool FUnrealMCPServer::LoadMetadata()
 {
-    const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("UnrealMCP"));
+    const TSharedPtr<IPlugin> Plugin = IPluginManager::Get().FindPlugin(TEXT("ModelContextProtocol"));
     if (!Plugin)
     {
-        UE_LOG(LogUnrealMCP, Error, TEXT("Unable to locate the UnrealMCP plugin directory."));
+        UE_LOG(LogModelContextProtocol, Error, TEXT("Unable to locate the ModelContextProtocol plugin directory."));
         return false;
     }
-    const FString Path = FPaths::Combine(Plugin->GetBaseDir(), TEXT("Resources/UnrealMCP/metadata.json"));
+    const FString Path = FPaths::Combine(Plugin->GetBaseDir(), TEXT("Resources/ModelContextProtocol/metadata.json"));
     FString Text;
     if (!FFileHelper::LoadFileToString(Text, *Path))
     {
-        UE_LOG(LogUnrealMCP, Error, TEXT("Unable to read MCP metadata: %s"), *Path);
+        UE_LOG(LogModelContextProtocol, Error, TEXT("Unable to read MCP metadata: %s"), *Path);
         return false;
     }
     const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Text);
@@ -943,7 +1360,14 @@ bool FUnrealMCPServer::LoadMetadata()
         || !Metadata->HasTypedField<EJson::Object>(TEXT("tool"))
         || !Metadata->HasTypedField<EJson::Array>(TEXT("capabilities")))
     {
-        UE_LOG(LogUnrealMCP, Error, TEXT("Invalid MCP metadata: %s"), *Path);
+        UE_LOG(LogModelContextProtocol, Error, TEXT("Invalid MCP metadata: %s"), *Path);
+        Metadata.Reset();
+        return false;
+    }
+    const TSharedPtr<FJsonObject> Tool = Metadata->GetObjectField(TEXT("tool"));
+    if (!Tool->HasTypedField<EJson::Object>(TEXT("inputSchema")))
+    {
+        UE_LOG(LogModelContextProtocol, Error, TEXT("MCP metadata tool has no inputSchema: %s"), *Path);
         Metadata.Reset();
         return false;
     }
@@ -967,10 +1391,19 @@ bool FUnrealMCPServer::IsOriginAllowed(const FHttpServerRequest& Request) const
             TEXT("localhost"), TEXT("127.0.0.1"), TEXT("[::1]") };
         for (const FString& Authority : Authorities)
         {
-            if (Value.Equals(Authority, ESearchCase::IgnoreCase)
-                || Value.StartsWith(Authority + TEXT(":"), ESearchCase::IgnoreCase))
+            if (Value.Equals(Authority, ESearchCase::IgnoreCase))
             {
                 return true;
+            }
+            const FString PortPrefix = Authority + TEXT(":");
+            if (Value.StartsWith(PortPrefix, ESearchCase::IgnoreCase))
+            {
+                const FString PortText = Value.RightChop(PortPrefix.Len());
+                if (!PortText.IsEmpty() && PortText.IsNumeric())
+                {
+                    const int32 ParsedPort = FCString::Atoi(*PortText);
+                    return ParsedPort > 0 && ParsedPort <= 65535;
+                }
             }
         }
         return false;
@@ -1003,13 +1436,56 @@ bool FUnrealMCPServer::IsOriginAllowed(const FHttpServerRequest& Request) const
     return !Authority.Contains(TEXT("/")) && MatchesLocalAuthority(Authority);
 }
 
+FString FUnrealMCPServer::RequestOwnerId(const FHttpServerRequest& Request) const
+{
+    const auto IsSafeId = [](const FString& Value)
+    {
+        if (Value.IsEmpty() || Value.Len() > 128)
+        {
+            return false;
+        }
+        for (const TCHAR Character : Value)
+        {
+            if (!FChar::IsAlnum(Character) && Character != TEXT('-')
+                && Character != TEXT('_') && Character != TEXT('.'))
+            {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    const FString SessionId = HeaderValue(Request, TEXT("Mcp-Session-Id"));
+    if (IsSafeId(SessionId))
+    {
+        return SessionId;
+    }
+    const FString ClientId = HeaderValue(Request, TEXT("X-MCP-Client-Id"));
+    if (IsSafeId(ClientId))
+    {
+        return FString::Printf(TEXT("client-%s"), *ClientId);
+    }
+    return FGuid::NewGuid().ToString(EGuidFormats::DigitsWithHyphensLower);
+}
+
 TUniquePtr<FHttpServerResponse> FUnrealMCPServer::JsonResponse(
     const TSharedRef<FJsonObject>& Object,
     EHttpServerResponseCodes Code) const
 {
+    FString Text = JsonToString(Object);
+    EHttpServerResponseCodes ResponseCode = Code;
+    const FTCHARToUTF8 Encoded(*Text);
+    if (Encoded.Length() > MaxResponseBytes)
+    {
+        Text = JsonToString(JsonRpcError(
+            Object->TryGetField(TEXT("id")),
+            -32603,
+            TEXT("Response exceeds the 4 MiB limit.")));
+        ResponseCode = EHttpServerResponseCodes::ServerError;
+    }
     TUniquePtr<FHttpServerResponse> Response =
-        FHttpServerResponse::Create(JsonToString(Object), TEXT("application/json; charset=utf-8"));
-    Response->Code = Code;
+        FHttpServerResponse::Create(Text, TEXT("application/json; charset=utf-8"));
+    Response->Code = ResponseCode;
     Response->Headers.Add(TEXT("Cache-Control"), { TEXT("no-store") });
     return Response;
 }

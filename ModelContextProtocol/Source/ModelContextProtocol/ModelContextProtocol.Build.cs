@@ -1,8 +1,8 @@
 using UnrealBuildTool;
 
-public class UnrealMCP : ModuleRules
+public class ModelContextProtocol : ModuleRules
 {
-    public UnrealMCP(ReadOnlyTargetRules Target) : base(Target)
+    public ModelContextProtocol(ReadOnlyTargetRules Target) : base(Target)
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
 

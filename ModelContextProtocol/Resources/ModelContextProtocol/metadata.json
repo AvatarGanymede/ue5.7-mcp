@@ -9,7 +9,7 @@
         {
           "properties": {
             "action": { "const": "discover", "description": "Search capability recipes." },
-            "query": { "type": "string", "description": "Natural-language capability query." },
+            "query": { "type": "string", "maxLength": 4096, "description": "Natural-language capability query (maximum 4096 characters)." },
             "domain": { "type": "string", "description": "Exact capability-domain id." },
             "limit": { "type": "integer", "minimum": 1, "maximum": 50 }
           },
@@ -56,8 +56,8 @@
                 ]
               }
             },
-            "run": { "enum": ["sync", "async"], "default": "sync" },
-            "transaction": { "type": "boolean", "default": true },
+            "run": { "enum": ["sync", "async"], "default": "sync", "description": "Async batches yield the Game Thread between commands." },
+            "transaction": { "type": "boolean", "default": true, "description": "Record each command for Undo. The batch is not atomic and earlier commands are not rolled back after failure or cancellation." },
             "continue_on_error": { "type": "boolean", "default": false }
           },
           "required": ["action", "commands"],
@@ -66,10 +66,19 @@
         {
           "properties": {
             "action": { "const": "task", "description": "Manage asynchronous batches." },
-            "command": { "enum": ["get", "list", "cancel"] },
+            "command": { "enum": ["get", "list", "cancel"], "description": "Cancellation is cooperative and takes effect only between commands." },
             "task_id": { "type": "string", "format": "uuid" }
           },
           "required": ["action", "command"],
+          "oneOf": [
+            {
+              "properties": { "command": { "const": "list" } }
+            },
+            {
+              "properties": { "command": { "enum": ["get", "cancel"] } },
+              "required": ["task_id"]
+            }
+          ],
           "additionalProperties": false
         }
       ]

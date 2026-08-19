@@ -4,12 +4,12 @@
 
 class FUnrealMCPServer;
 
-class FUnrealMCPModule final : public IModuleInterface
+class FModelContextProtocolModule final : public IModuleInterface
 {
 public:
     virtual void StartupModule() override;
     virtual void ShutdownModule() override;
 
 private:
-    TUniquePtr<FUnrealMCPServer> Server;
+    TSharedPtr<FUnrealMCPServer, ESPMode::ThreadSafe> Server;
 };

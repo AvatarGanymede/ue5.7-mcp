@@ -11,7 +11,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 if (-not $OutputFile) {
-    $OutputFile = Join-Path $repositoryRoot 'artifacts\UnrealMCP-0.3.2-UE5.7-Win64-GitHub.zip'
+    $OutputFile = Join-Path $repositoryRoot 'artifacts\UnrealMCP-0.4.0-UE5.7-Win64-GitHub.zip'
 }
 $OutputFile = [System.IO.Path]::GetFullPath($OutputFile)
 if (Test-Path -LiteralPath $OutputFile) {
@@ -20,7 +20,7 @@ if (Test-Path -LiteralPath $OutputFile) {
 
 $stagingRoot = Join-Path $env:TEMP ('UnrealMCP-GitHub-' + [guid]::NewGuid().ToString('N'))
 $pluginsDirectory = Join-Path $stagingRoot 'Plugins'
-$pluginPackage = Join-Path $pluginsDirectory 'UnrealMCP'
+$pluginPackage = Join-Path $pluginsDirectory 'ModelContextProtocol'
 New-Item -ItemType Directory -Path $pluginsDirectory -Force | Out-Null
 
 try {
@@ -30,14 +30,14 @@ try {
     if ([System.IO.Directory]::Exists($intermediate)) {
         [System.IO.Directory]::Delete($intermediate, $true)
     }
-    $pdb = Join-Path $pluginPackage 'Binaries\Win64\UnrealEditor-UnrealMCP.pdb'
+    $pdb = Join-Path $pluginPackage 'Binaries\Win64\UnrealEditor-ModelContextProtocol.pdb'
     if ([System.IO.File]::Exists($pdb)) {
         [System.IO.File]::Delete($pdb)
     }
 
     $required = @(
-        (Join-Path $pluginPackage 'UnrealMCP.uplugin'),
-        (Join-Path $pluginPackage 'Binaries\Win64\UnrealEditor-UnrealMCP.dll'),
+        (Join-Path $pluginPackage 'ModelContextProtocol.uplugin'),
+        (Join-Path $pluginPackage 'Binaries\Win64\UnrealEditor-ModelContextProtocol.dll'),
         (Join-Path $pluginPackage 'Source'),
         (Join-Path $pluginPackage 'Config'),
         (Join-Path $pluginPackage 'Resources'),

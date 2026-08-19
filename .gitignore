@@ -6,12 +6,12 @@
 **/Saved/
 
 # Track only the prebuilt Win64 files used by tagged GitHub releases.
-!UnrealMCP/Binaries/
-UnrealMCP/Binaries/*
-!UnrealMCP/Binaries/Win64/
-UnrealMCP/Binaries/Win64/*
-!UnrealMCP/Binaries/Win64/UnrealEditor-UnrealMCP.dll
-!UnrealMCP/Binaries/Win64/UnrealEditor.modules
+!ModelContextProtocol/Binaries/
+ModelContextProtocol/Binaries/*
+!ModelContextProtocol/Binaries/Win64/
+ModelContextProtocol/Binaries/Win64/*
+!ModelContextProtocol/Binaries/Win64/UnrealEditor-ModelContextProtocol.dll
+!ModelContextProtocol/Binaries/Win64/UnrealEditor.modules
 
 # Generated release packages; publish these as release/Fab attachments
 /artifacts/

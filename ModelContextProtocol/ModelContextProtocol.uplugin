@@ -1,8 +1,8 @@
 {
   "FileVersion": 3,
-  "Version": 5,
-  "VersionName": "0.3.2",
-  "FriendlyName": "Minimal MCP for Unreal Editor",
+  "Version": 6,
+  "VersionName": "0.4.0",
+  "FriendlyName": "MCP for Unreal Editor",
   "Description": "In-editor Streamable HTTP MCP server for Unreal Engine 5.7.",
   "Category": "Editor",
   "CreatedBy": "UnrealMCP contributors",
@@ -14,7 +14,7 @@
   ],
   "Modules": [
     {
-      "Name": "UnrealMCP",
+      "Name": "ModelContextProtocol",
       "Type": "Editor",
       "LoadingPhase": "PostEngineInit"
     }
