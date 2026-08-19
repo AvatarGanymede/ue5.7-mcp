@@ -40,6 +40,7 @@ jobs:
           $PSNativeCommandUseErrorActionPreference = $false
           $refInfo = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '[.object.type, .object.sha] | @tsv' 2>$null
           $tagExists = $LASTEXITCODE -eq 0
+          $global:LASTEXITCODE = 0
           $PSNativeCommandUseErrorActionPreference = $previousNativePreference
 
           if ($tagExists) {
