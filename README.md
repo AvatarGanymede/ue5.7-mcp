@@ -86,6 +86,12 @@ The descriptor must end up at `<Project>/Plugins/UnrealMCP/UnrealMCP.uplugin`. O
 > [!IMPORTANT]
 > Do not use GitHub's automatically generated **Source code (zip)** or **Source code (tar.gz)** archive as the installer. Those archives use the repository layout and are not validated as project-ready packages. Use the named release asset above, or build the plugin from source.
 
+### Upgrade from a gateway-based release
+
+Version `0.3.1` does not contain or launch `UnrealMCPGateway.exe`. When upgrading from `0.2.x`, close Unreal Editor and replace the entire existing `UnrealMCP` plugin directory instead of copying `0.3.1` over it; an in-place merge can leave the obsolete gateway EXE and source files behind.
+
+Replace the old command-based STDIO entry in Codex configuration with the URL-based configuration in [Connect Codex](#connect-codex). Remove the old gateway `command`, `startup_timeout_sec`, `UE_MCP_WORKER_*`, and `UE_MCP_TIMEOUT_MS` settings. The current plugin reads `UE_MCP_PORT` and `UE_MCP_TOKEN` when Unreal Editor starts, and Codex connects directly to the in-editor endpoint—there is no separate gateway process to configure or start.
+
 ### Install from source
 
 Clone the repository and create the same project-ready ZIP locally:
@@ -321,7 +327,7 @@ If `UnrealMCP/Binaries/Win64/UnrealEditor-UnrealMCP.dll` and `UnrealEditor.modul
 .\scripts\package-prebuilt-github-release.ps1 -OutputFile '.\artifacts\UnrealMCP-0.3.1-UE5.7-Win64-GitHub.zip'
 ```
 
-The tagged-release workflow uses this prebuilt path. It requires the descriptor, `package.json`, and `vMAJOR.MINOR.PATCH` tag versions to match, and fails when either required Win64 binary is absent from the tagged commit. If a release already exists, a manual workflow run can package the selected tag and upload or replace its named ZIP asset without trying to create the release again.
+The release workflow runs for every push to `main` and treats `UnrealMCP.uplugin` as the single product-version source. When the corresponding `vMAJOR.MINOR.PATCH` tag does not exist, it verifies both Win64 binaries, packages the commit, creates the tag, and publishes the named ZIP. If that version was already released from an earlier commit, the workflow succeeds without publishing again.
 
 Create the single-top-level Fab ZIP:
 
@@ -389,13 +395,13 @@ Plugin startup, bind, authorization, protocol, and execution errors appear in th
 | `scripts/package-prebuilt-github-release.ps1` | Package locally built, tracked Win64 binaries without installing UE on the runner. |
 | `scripts/build-fab-package.ps1` | Build and validate the Fab-oriented ZIP. |
 | `scripts/test-http-e2e.ps1` | Run the real editor end-to-end test. |
-| `.github/workflows/release.yml` | Package and publish a GitHub Release when a `vMAJOR.MINOR.PATCH` tag is pushed. |
+| `.github/workflows/release.yml` | On each `main` push, publish a new `.uplugin` version when its corresponding tag does not exist. |
 | `tests/` | Metadata and optional Streamable HTTP client tests. |
 | `docs/` | Architecture, capability, and minimization design notes. |
 
 ## Distribution notes
 
-Publish the `...-GitHub.zip` package as a named GitHub Release asset for project installation; GitHub's automatic source archives are repository snapshots rather than validated project-ready packages. For automated releases, build `UnrealEditor-UnrealMCP.dll` and `UnrealEditor.modules` locally, include both files in the tagged commit, keep the tag version aligned with `UnrealMCP.uplugin` and `package.json`, and push a `vMAJOR.MINOR.PATCH` tag. The release workflow packages the tracked binaries on `windows-latest` and publishes the named ZIP without installing Unreal Engine. It is safe to rerun for an existing release: the workflow replaces only the same named ZIP asset. The separate `...-Fab.zip` package uses the single-plugin-root structure expected for Fab technical review. Marketplace publication still requires seller/listing metadata and visual assets such as the plugin icon and screenshots, plus a package tested for every advertised engine version and platform.
+Publish the `...-GitHub.zip` package as a named GitHub Release asset for project installation; GitHub's automatic source archives are repository snapshots rather than validated project-ready packages. For automated releases, update `UnrealMCP.uplugin` to a new semantic version, build `UnrealEditor-UnrealMCP.dll` and `UnrealEditor.modules` locally, include the descriptor and both binaries in the same commit, and push that commit to `main`. The release workflow derives `vMAJOR.MINOR.PATCH` from the descriptor, creates the tag at that commit, packages the tracked binaries on `windows-latest`, and publishes the named ZIP without installing Unreal Engine. Pushes that retain an already released version are successful no-ops. The separate `...-Fab.zip` package uses the single-plugin-root structure expected for Fab technical review. Marketplace publication still requires seller/listing metadata and visual assets such as the plugin icon and screenshots, plus a package tested for every advertised engine version and platform.
 
 License details are in [LICENSE](LICENSE), and third-party notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Additional design notes: [architecture](docs/architecture.md), [capability coverage](docs/capability-coverage.md), and [tool minimization](docs/tool-minimization.md).
 

@@ -2,51 +2,66 @@ name: Package and publish release
 
 on:
   push:
-    tags:
-      - "v*.*.*"
+    branches:
+      - main
   workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing vMAJOR.MINOR.PATCH tag to package and publish
-        required: true
-        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}-${{ inputs.tag }}
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   release:
-    name: Package prebuilt Win64 plugin
+    name: Publish a new plugin version
     runs-on: windows-latest
     timeout-minutes: 15
 
     steps:
-      - name: Check out tagged source
+      - name: Check out source
         uses: actions/checkout@v6
-        with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
-      - name: Validate tag and prebuilt binary versions
+      - name: Identify the plugin version
+        id: release
         shell: pwsh
         env:
-          REQUESTED_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if ($env:REQUESTED_TAG -notmatch '^v(?<Version>\d+\.\d+\.\d+)$') {
-            throw "Release tag must use vMAJOR.MINOR.PATCH: $env:REQUESTED_TAG"
+          $descriptor = Get-Content -LiteralPath 'UnrealMCP/UnrealMCP.uplugin' -Raw | ConvertFrom-Json
+          $version = [string]$descriptor.VersionName
+          if ($version -notmatch '^\d+\.\d+\.\d+$') {
+            throw "UnrealMCP.uplugin VersionName must use MAJOR.MINOR.PATCH: $version"
           }
 
-          $version = $Matches.Version
-          $descriptor = Get-Content -LiteralPath 'UnrealMCP/UnrealMCP.uplugin' -Raw | ConvertFrom-Json
-          $package = Get-Content -LiteralPath 'package.json' -Raw | ConvertFrom-Json
-          if ([string]$descriptor.VersionName -ne $version) {
-            throw "Tag version $version does not match UnrealMCP.uplugin VersionName $($descriptor.VersionName)"
-          }
-          if ([string]$package.version -ne $version) {
-            throw "Tag version $version does not match package.json version $($package.version)"
+          $tag = "v$version"
+          $previousNativePreference = $PSNativeCommandUseErrorActionPreference
+          $PSNativeCommandUseErrorActionPreference = $false
+          $refInfo = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '[.object.type, .object.sha] | @tsv' 2>$null
+          $tagExists = $LASTEXITCODE -eq 0
+          $PSNativeCommandUseErrorActionPreference = $previousNativePreference
+
+          if ($tagExists) {
+            $refParts = ([string]$refInfo).Trim() -split "`t", 2
+            if ($refParts.Count -ne 2) {
+              throw "Unexpected Git ref response for $tag"
+            }
+            $tagType = $refParts[0]
+            $tagTarget = $refParts[1]
+            if ($tagType -eq 'tag') {
+              $tagTarget = gh api "repos/$env:GITHUB_REPOSITORY/git/tags/$tagTarget" --jq '.object.sha'
+              if ($LASTEXITCODE -ne 0) {
+                throw "Failed to resolve annotated tag $tag"
+              }
+              $tagTarget = ([string]$tagTarget).Trim()
+            }
+
+            if (-not $tagTarget.Equals($env:GITHUB_SHA, [System.StringComparison]::OrdinalIgnoreCase)) {
+              Write-Host "Version $version is already represented by $tag at commit $tagTarget; nothing to publish."
+              'should_release=false' | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+              exit 0
+            }
           }
 
           $requiredBinaries = @(
@@ -55,32 +70,41 @@ jobs:
           )
           foreach ($path in $requiredBinaries) {
             if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-              throw "Tagged source is missing prebuilt release binary: $path"
+              throw "The release commit is missing prebuilt binary: $path"
             }
           }
 
           $zipName = "UnrealMCP-$version-UE5.7-Win64-GitHub.zip"
           $zipPath = Join-Path $env:GITHUB_WORKSPACE "artifacts/$zipName"
-          "RELEASE_TAG=$env:REQUESTED_TAG" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
-          "RELEASE_VERSION=$version" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
-          "RELEASE_ZIP=$zipPath" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
+          'should_release=true' | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+          "tag=$tag" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+          "tag_exists=$($tagExists.ToString().ToLowerInvariant())" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+          "version=$version" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
+          "zip_path=$zipPath" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
 
       - name: Package prebuilt plugin
+        if: steps.release.outputs.should_release == 'true'
         shell: pwsh
         run: |
-          ./scripts/package-prebuilt-github-release.ps1 -OutputFile $env:RELEASE_ZIP
+          ./scripts/package-prebuilt-github-release.ps1 -OutputFile '${{ steps.release.outputs.zip_path }}'
 
       - name: Upload workflow artifact
+        if: steps.release.outputs.should_release == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: github-release-${{ github.run_id }}
+          name: github-release-${{ steps.release.outputs.tag }}-${{ github.run_id }}
           path: artifacts/*-GitHub.zip
           if-no-files-found: error
 
-      - name: Publish GitHub Release
+      - name: Create tag and publish GitHub Release
+        if: steps.release.outputs.should_release == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+          RELEASE_VERSION: ${{ steps.release.outputs.version }}
+          RELEASE_ZIP: ${{ steps.release.outputs.zip_path }}
+          TAG_EXISTS: ${{ steps.release.outputs.tag_exists }}
         run: |
           $previousNativePreference = $PSNativeCommandUseErrorActionPreference
           $PSNativeCommandUseErrorActionPreference = $false
@@ -94,10 +118,17 @@ jobs:
               --repo $env:GITHUB_REPOSITORY `
               --clobber
           }
-          else {
+          elseif ($env:TAG_EXISTS -eq 'true') {
             gh release create $env:RELEASE_TAG $env:RELEASE_ZIP `
               --repo $env:GITHUB_REPOSITORY `
               --verify-tag `
+              --generate-notes `
+              --title "UnrealMCP $env:RELEASE_VERSION - UE 5.7 Win64"
+          }
+          else {
+            gh release create $env:RELEASE_TAG $env:RELEASE_ZIP `
+              --repo $env:GITHUB_REPOSITORY `
+              --target $env:GITHUB_SHA `
               --generate-notes `
               --title "UnrealMCP $env:RELEASE_VERSION - UE 5.7 Win64"
           }

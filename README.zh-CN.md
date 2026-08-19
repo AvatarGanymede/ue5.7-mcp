@@ -86,6 +86,12 @@ tool_timeout_sec = 3600
 > [!IMPORTANT]
 > 不要把 GitHub 自动生成的 **Source code (zip)** 或 **Source code (tar.gz)** 当成安装包使用。这两个压缩包采用仓库目录结构，并不是经过校验、可直接安装到工程的插件包。普通用户应下载上面的命名发布附件；开发者也可以自行从源码构建。
 
+### 从使用网关的旧版本升级
+
+`0.3.1` 不包含也不会启动 `UnrealMCPGateway.exe`。从 `0.2.x` 升级时，请先关闭 Unreal Editor，再完整替换已有的 `UnrealMCP` 插件目录，不要把 `0.3.1` 直接覆盖合并到旧目录；否则可能残留已经废弃的网关 EXE 和源码文件。
+
+请将 Codex 配置中旧的命令式 STDIO 条目替换为[连接 Codex](#连接-codex) 中的 URL 配置，并删除旧网关使用的 `command`、`startup_timeout_sec`、`UE_MCP_WORKER_*` 和 `UE_MCP_TIMEOUT_MS` 设置。当前插件会在 Unreal Editor 启动时读取 `UE_MCP_PORT` 和 `UE_MCP_TOKEN`，Codex 则直接连接 Editor 内的端点；无需配置或启动独立网关进程。
+
 ### 从源码安装
 
 克隆仓库，并在本机生成同样的工程安装包：
@@ -321,7 +327,7 @@ tool_timeout_sec = 3600
 .\scripts\package-prebuilt-github-release.ps1 -OutputFile '.\artifacts\UnrealMCP-0.3.1-UE5.7-Win64-GitHub.zip'
 ```
 
-版本标签发布 Workflow 使用这条预编译打包路径。它要求描述文件、`package.json` 和 `vMAJOR.MINOR.PATCH` 标签的版本一致；如果标签对应的提交缺少任一 Win64 必需二进制文件，发布会失败。如果 Release 已经存在，可以手动运行 Workflow，选择相应标签重新打包并上传或替换命名 ZIP，而不会再次创建同名 Release。
+发布 Workflow 会在每次推送到 `main` 时运行，并将 `UnrealMCP.uplugin` 作为唯一的产品版本来源。如果对应的 `vMAJOR.MINOR.PATCH` 标签尚不存在，它会检查两个 Win64 二进制文件、打包当前提交、创建标签并发布命名 ZIP。如果该版本已经由更早的提交发布，Workflow 会成功结束而不重复发布。
 
 创建只有一个顶层目录的 Fab ZIP：
 
@@ -388,13 +394,13 @@ npm test
 | `scripts/package-prebuilt-github-release.ps1` | 无需在 runner 安装 UE，直接打包本地构建并纳入版本控制的 Win64 二进制。 |
 | `scripts/build-fab-package.ps1` | 构建并校验面向 Fab 的 ZIP。 |
 | `scripts/test-http-e2e.ps1` | 运行真实编辑器端到端测试。 |
-| `.github/workflows/release.yml` | 推送 `vMAJOR.MINOR.PATCH` 标签时打包并发布 GitHub Release。 |
+| `.github/workflows/release.yml` | 每次推送 `main` 时检查 `.uplugin` 版本，并在对应标签不存在时发布新版本。 |
 | `tests/` | 元数据和可选 Streamable HTTP 客户端测试。 |
 | `docs/` | 架构、能力覆盖和工具精简设计说明。 |
 
 ## 发布说明
 
-应将 `...-GitHub.zip` 作为命名附件上传到 GitHub Release，供用户安装到工程；GitHub 自动生成的源码压缩包是仓库快照，不是经过校验、可直接安装到工程的插件包。自动发布时，先在本地构建 `UnrealEditor-UnrealMCP.dll` 和 `UnrealEditor.modules`，将两者纳入标签对应的提交，保持标签版本与 `UnrealMCP.uplugin`、`package.json` 一致，然后推送 `vMAJOR.MINOR.PATCH` 标签。发布 Workflow 会在 `windows-latest` 上打包已跟踪的二进制并发布命名 ZIP，不需要安装 Unreal Engine。对于已经存在的 Release，可以安全地重新运行 Workflow；它只替换同名 ZIP 附件。另行生成的 `...-Fab.zip` 使用 Fab 技术审核所需的单插件根目录结构。正式上架仍需要卖家与商品页元数据、插件图标和截图等视觉素材，并为所有声明支持的引擎版本和平台分别提供经过测试的软件包。
+应将 `...-GitHub.zip` 作为命名附件上传到 GitHub Release，供用户安装到工程；GitHub 自动生成的源码压缩包是仓库快照，不是经过校验、可直接安装到工程的插件包。自动发布时，先把 `UnrealMCP.uplugin` 更新为新的语义化版本，在本地构建 `UnrealEditor-UnrealMCP.dll` 和 `UnrealEditor.modules`，将描述文件和两个二进制纳入同一次提交，然后推送该提交到 `main`。发布 Workflow 会从描述文件推导 `vMAJOR.MINOR.PATCH`，在该提交上创建标签，在 `windows-latest` 上打包已跟踪的二进制并发布命名 ZIP，不需要安装 Unreal Engine。没有改变已发布版本号的后续提交会成功跳过发布。另行生成的 `...-Fab.zip` 使用 Fab 技术审核所需的单插件根目录结构。正式上架仍需要卖家与商品页元数据、插件图标和截图等视觉素材，并为所有声明支持的引擎版本和平台分别提供经过测试的软件包。
 
 许可证详见 [LICENSE](LICENSE)，第三方声明详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。其他设计文档：[架构](docs/architecture.md)、[能力覆盖](docs/capability-coverage.md)和[工具精简](docs/tool-minimization.md)。
 
