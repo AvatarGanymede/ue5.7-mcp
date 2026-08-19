@@ -80,7 +80,6 @@ jobs:
           'should_release=true' | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
           "tag=$tag" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
           "tag_exists=$($tagExists.ToString().ToLowerInvariant())" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
-          "version=$version" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
           "zip_path=$zipPath" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
 
       - name: Package prebuilt plugin
@@ -103,7 +102,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ steps.release.outputs.tag }}
-          RELEASE_VERSION: ${{ steps.release.outputs.version }}
           RELEASE_ZIP: ${{ steps.release.outputs.zip_path }}
           TAG_EXISTS: ${{ steps.release.outputs.tag_exists }}
         run: |
@@ -115,6 +113,12 @@ jobs:
 
           if ($releaseExists) {
             Write-Host "Release $env:RELEASE_TAG already exists; uploading the packaged asset."
+            gh release edit $env:RELEASE_TAG `
+              --repo $env:GITHUB_REPOSITORY `
+              --title $env:RELEASE_TAG
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to update the title for release $env:RELEASE_TAG"
+            }
             gh release upload $env:RELEASE_TAG $env:RELEASE_ZIP `
               --repo $env:GITHUB_REPOSITORY `
               --clobber
@@ -124,14 +128,14 @@ jobs:
               --repo $env:GITHUB_REPOSITORY `
               --verify-tag `
               --generate-notes `
-              --title "UnrealMCP $env:RELEASE_VERSION - UE 5.7 Win64"
+              --title $env:RELEASE_TAG
           }
           else {
             gh release create $env:RELEASE_TAG $env:RELEASE_ZIP `
               --repo $env:GITHUB_REPOSITORY `
               --target $env:GITHUB_SHA `
               --generate-notes `
-              --title "UnrealMCP $env:RELEASE_VERSION - UE 5.7 Win64"
+              --title $env:RELEASE_TAG
           }
 
           if ($LASTEXITCODE -ne 0) {
