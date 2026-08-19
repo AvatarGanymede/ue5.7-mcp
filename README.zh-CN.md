@@ -321,7 +321,7 @@ tool_timeout_sec = 3600
 .\scripts\package-prebuilt-github-release.ps1 -OutputFile '.\artifacts\UnrealMCP-0.3.1-UE5.7-Win64-GitHub.zip'
 ```
 
-版本标签发布 Workflow 使用这条预编译打包路径。它要求描述文件、`package.json` 和 `vMAJOR.MINOR.PATCH` 标签的版本一致；如果标签对应的提交缺少任一 Win64 必需二进制文件，发布会失败。
+版本标签发布 Workflow 使用这条预编译打包路径。它要求描述文件、`package.json` 和 `vMAJOR.MINOR.PATCH` 标签的版本一致；如果标签对应的提交缺少任一 Win64 必需二进制文件，发布会失败。如果 Release 已经存在，可以手动运行 Workflow，选择相应标签重新打包并上传或替换命名 ZIP，而不会再次创建同名 Release。
 
 创建只有一个顶层目录的 Fab ZIP：
 
@@ -394,7 +394,7 @@ npm test
 
 ## 发布说明
 
-应将 `...-GitHub.zip` 作为命名附件上传到 GitHub Release，供用户安装到工程；GitHub 自动生成的源码压缩包是仓库快照，不是经过校验、可直接安装到工程的插件包。自动发布时，先在本地构建 `UnrealEditor-UnrealMCP.dll` 和 `UnrealEditor.modules`，将两者纳入标签对应的提交，保持标签版本与 `UnrealMCP.uplugin`、`package.json` 一致，然后推送 `vMAJOR.MINOR.PATCH` 标签。发布 Workflow 会在 `windows-latest` 上打包已跟踪的二进制并发布命名 ZIP，不需要安装 Unreal Engine。另行生成的 `...-Fab.zip` 使用 Fab 技术审核所需的单插件根目录结构。正式上架仍需要卖家与商品页元数据、插件图标和截图等视觉素材，并为所有声明支持的引擎版本和平台分别提供经过测试的软件包。
+应将 `...-GitHub.zip` 作为命名附件上传到 GitHub Release，供用户安装到工程；GitHub 自动生成的源码压缩包是仓库快照，不是经过校验、可直接安装到工程的插件包。自动发布时，先在本地构建 `UnrealEditor-UnrealMCP.dll` 和 `UnrealEditor.modules`，将两者纳入标签对应的提交，保持标签版本与 `UnrealMCP.uplugin`、`package.json` 一致，然后推送 `vMAJOR.MINOR.PATCH` 标签。发布 Workflow 会在 `windows-latest` 上打包已跟踪的二进制并发布命名 ZIP，不需要安装 Unreal Engine。对于已经存在的 Release，可以安全地重新运行 Workflow；它只替换同名 ZIP 附件。另行生成的 `...-Fab.zip` 使用 Fab 技术审核所需的单插件根目录结构。正式上架仍需要卖家与商品页元数据、插件图标和截图等视觉素材，并为所有声明支持的引擎版本和平台分别提供经过测试的软件包。
 
 许可证详见 [LICENSE](LICENSE)，第三方声明详见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。其他设计文档：[架构](docs/architecture.md)、[能力覆盖](docs/capability-coverage.md)和[工具精简](docs/tool-minimization.md)。
 

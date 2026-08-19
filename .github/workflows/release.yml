@@ -4,12 +4,18 @@ on:
   push:
     tags:
       - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing vMAJOR.MINOR.PATCH tag to package and publish
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ github.ref }}-${{ inputs.tag }}
   cancel-in-progress: false
 
 jobs:
@@ -21,12 +27,16 @@ jobs:
     steps:
       - name: Check out tagged source
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
       - name: Validate tag and prebuilt binary versions
         shell: pwsh
+        env:
+          REQUESTED_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
         run: |
-          if ($env:GITHUB_REF_NAME -notmatch '^v(?<Version>\d+\.\d+\.\d+)$') {
-            throw "Release tag must use vMAJOR.MINOR.PATCH: $env:GITHUB_REF_NAME"
+          if ($env:REQUESTED_TAG -notmatch '^v(?<Version>\d+\.\d+\.\d+)$') {
+            throw "Release tag must use vMAJOR.MINOR.PATCH: $env:REQUESTED_TAG"
           }
 
           $version = $Matches.Version
@@ -51,6 +61,7 @@ jobs:
 
           $zipName = "UnrealMCP-$version-UE5.7-Win64-GitHub.zip"
           $zipPath = Join-Path $env:GITHUB_WORKSPACE "artifacts/$zipName"
+          "RELEASE_TAG=$env:REQUESTED_TAG" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
           "RELEASE_VERSION=$version" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
           "RELEASE_ZIP=$zipPath" | Add-Content -LiteralPath $env:GITHUB_ENV -Encoding utf8
 
@@ -62,7 +73,7 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: github-release-${{ github.ref_name }}
+          name: github-release-${{ github.run_id }}
           path: artifacts/*-GitHub.zip
           if-no-files-found: error
 
@@ -71,8 +82,26 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create $env:GITHUB_REF_NAME $env:RELEASE_ZIP `
-            --repo $env:GITHUB_REPOSITORY `
-            --verify-tag `
-            --generate-notes `
-            --title "UnrealMCP $env:RELEASE_VERSION - UE 5.7 Win64"
+          $previousNativePreference = $PSNativeCommandUseErrorActionPreference
+          $PSNativeCommandUseErrorActionPreference = $false
+          gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null
+          $releaseExists = $LASTEXITCODE -eq 0
+          $PSNativeCommandUseErrorActionPreference = $previousNativePreference
+
+          if ($releaseExists) {
+            Write-Host "Release $env:RELEASE_TAG already exists; uploading the packaged asset."
+            gh release upload $env:RELEASE_TAG $env:RELEASE_ZIP `
+              --repo $env:GITHUB_REPOSITORY `
+              --clobber
+          }
+          else {
+            gh release create $env:RELEASE_TAG $env:RELEASE_ZIP `
+              --repo $env:GITHUB_REPOSITORY `
+              --verify-tag `
+              --generate-notes `
+              --title "UnrealMCP $env:RELEASE_VERSION - UE 5.7 Win64"
+          }
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to publish $env:RELEASE_ZIP to release $env:RELEASE_TAG"
+          }
