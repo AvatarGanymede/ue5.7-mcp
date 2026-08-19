@@ -391,7 +391,7 @@ TSharedRef<FJsonObject> FUnrealMCPServer::InitializeResult(const TSharedRef<FJso
     TSharedRef<FJsonObject> ServerInfo = MakeShared<FJsonObject>();
     ServerInfo->SetStringField(TEXT("name"), TEXT("ue57-mcp"));
     ServerInfo->SetStringField(TEXT("title"), TEXT("Unreal Editor MCP"));
-    ServerInfo->SetStringField(TEXT("version"), TEXT("0.3.0"));
+    ServerInfo->SetStringField(TEXT("version"), TEXT("0.3.1"));
     Result->SetObjectField(TEXT("serverInfo"), ServerInfo);
     Result->SetStringField(TEXT("instructions"), ServerInstructions);
     return Result;
@@ -899,7 +899,7 @@ void FUnrealMCPServer::AddModernResultFields(const TSharedRef<FJsonObject>& Resu
         TSharedRef<FJsonObject> ServerInfo = MakeShared<FJsonObject>();
         ServerInfo->SetStringField(TEXT("name"), TEXT("ue57-mcp"));
         ServerInfo->SetStringField(TEXT("title"), TEXT("Unreal Editor MCP"));
-        ServerInfo->SetStringField(TEXT("version"), TEXT("0.3.0"));
+        ServerInfo->SetStringField(TEXT("version"), TEXT("0.3.1"));
         TSharedRef<FJsonObject> Meta = MakeShared<FJsonObject>();
         Meta->SetObjectField(TEXT("io.modelcontextprotocol/serverInfo"), ServerInfo);
         Result->SetObjectField(TEXT("_meta"), Meta);

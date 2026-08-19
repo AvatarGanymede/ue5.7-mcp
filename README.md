@@ -24,7 +24,7 @@ flowchart LR
 
 | Item | Current release |
 |---|---|
-| Plugin version | `0.3.0` |
+| Plugin version | `0.3.1` |
 | Engine | Unreal Engine `5.7` |
 | Platform | `Win64` |
 | Runtime target | Unreal Editor only |
@@ -312,13 +312,13 @@ Build a complete plugin package to a fresh directory:
 Create a project-ready GitHub Release ZIP with the top-level `Plugins/UnrealMCP/` layout:
 
 ```powershell
-.\scripts\build-github-package.ps1 -OutputFile '.\artifacts\UnrealMCP-0.3.0-UE5.7-Win64-GitHub.zip'
+.\scripts\build-github-package.ps1 -OutputFile '.\artifacts\UnrealMCP-0.3.1-UE5.7-Win64-GitHub.zip'
 ```
 
 If `UnrealMCP/Binaries/Win64/UnrealEditor-UnrealMCP.dll` and `UnrealEditor.modules` were already built locally, package those prebuilt files without invoking Unreal Build Tool:
 
 ```powershell
-.\scripts\package-prebuilt-github-release.ps1 -OutputFile '.\artifacts\UnrealMCP-0.3.0-UE5.7-Win64-GitHub.zip'
+.\scripts\package-prebuilt-github-release.ps1 -OutputFile '.\artifacts\UnrealMCP-0.3.1-UE5.7-Win64-GitHub.zip'
 ```
 
 The tagged-release workflow uses this prebuilt path. It requires the descriptor, `package.json`, and `vMAJOR.MINOR.PATCH` tag versions to match, and fails when either required Win64 binary is absent from the tagged commit.
@@ -326,7 +326,7 @@ The tagged-release workflow uses this prebuilt path. It requires the descriptor,
 Create the single-top-level Fab ZIP:
 
 ```powershell
-.\scripts\build-fab-package.ps1 -OutputFile '.\artifacts\UnrealMCP-0.3.0-UE5.7-Win64-Fab.zip'
+.\scripts\build-fab-package.ps1 -OutputFile '.\artifacts\UnrealMCP-0.3.1-UE5.7-Win64-Fab.zip'
 ```
 
 Both packages contain the descriptor, source, config, resources, Editor DLL, license notices, English and Simplified Chinese READMEs, and design documents. The GitHub ZIP starts at `Plugins/UnrealMCP/` so it can be extracted directly into a project root. The Fab ZIP contains exactly one top-level `UnrealMCP/` directory for marketplace submission. Both exclude `Intermediate`, PDB files, EXEs, Node packages, and the development test project.

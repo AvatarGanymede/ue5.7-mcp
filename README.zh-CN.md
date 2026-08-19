@@ -24,7 +24,7 @@ flowchart LR
 
 | 项目 | 当前版本 |
 |---|---|
-| 插件版本 | `0.3.0` |
+| 插件版本 | `0.3.1` |
 | 引擎 | Unreal Engine `5.7` |
 | 平台 | `Win64` |
 | 运行目标 | 仅 Unreal Editor |
@@ -312,13 +312,13 @@ tool_timeout_sec = 3600
 创建顶层结构为 `Plugins/UnrealMCP/`、可直接解压到工程根目录的 GitHub Release ZIP：
 
 ```powershell
-.\scripts\build-github-package.ps1 -OutputFile '.\artifacts\UnrealMCP-0.3.0-UE5.7-Win64-GitHub.zip'
+.\scripts\build-github-package.ps1 -OutputFile '.\artifacts\UnrealMCP-0.3.1-UE5.7-Win64-GitHub.zip'
 ```
 
 如果已经在本地构建好 `UnrealMCP/Binaries/Win64/UnrealEditor-UnrealMCP.dll` 和 `UnrealEditor.modules`，可直接打包这些预编译文件，而不调用 Unreal Build Tool：
 
 ```powershell
-.\scripts\package-prebuilt-github-release.ps1 -OutputFile '.\artifacts\UnrealMCP-0.3.0-UE5.7-Win64-GitHub.zip'
+.\scripts\package-prebuilt-github-release.ps1 -OutputFile '.\artifacts\UnrealMCP-0.3.1-UE5.7-Win64-GitHub.zip'
 ```
 
 版本标签发布 Workflow 使用这条预编译打包路径。它要求描述文件、`package.json` 和 `vMAJOR.MINOR.PATCH` 标签的版本一致；如果标签对应的提交缺少任一 Win64 必需二进制文件，发布会失败。
@@ -326,7 +326,7 @@ tool_timeout_sec = 3600
 创建只有一个顶层目录的 Fab ZIP：
 
 ```powershell
-.\scripts\build-fab-package.ps1 -OutputFile '.\artifacts\UnrealMCP-0.3.0-UE5.7-Win64-Fab.zip'
+.\scripts\build-fab-package.ps1 -OutputFile '.\artifacts\UnrealMCP-0.3.1-UE5.7-Win64-Fab.zip'
 ```
 
 两个安装包都包含描述文件、源码、配置、资源、Editor DLL、许可证说明、中英文 README 以及设计文档。GitHub ZIP 从 `Plugins/UnrealMCP/` 开始，可以直接解压到工程根目录；Fab ZIP 只有一个顶层 `UnrealMCP/` 目录，用于商城提交。两者都排除 `Intermediate`、PDB、EXE、Node 包和开发测试项目。
