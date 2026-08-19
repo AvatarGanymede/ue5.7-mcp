@@ -27,10 +27,19 @@ Unreal Editor must remain open with the target project loaded while an MCP clien
          └─ Binaries/Win64/UnrealEditor-ModelContextProtocol.dll
    ```
 
-4. Open the project, enable **MCP for Unreal Editor** and **Python Editor Script Plugin** under **Edit → Plugins**, then restart Unreal Editor.
+4. Open the project, enable **MCP for Unreal Editor** and **Python Editor Script Plugin** under **Edit → Plugins**, then restart Unreal Editor. If an installer or source-control change enables the plugin directly in the `.uproject` file, include the Win64 target explicitly to avoid UE 5.7's empty-target warning:
+
+   ```json
+   {
+     "Name": "ModelContextProtocol",
+     "Enabled": true,
+     "SupportedTargetPlatforms": ["Win64"]
+   }
+   ```
+
 5. Add the MCP endpoint to Codex:
 
-   ```powershell
+   ```bash
    codex mcp add unreal --url http://127.0.0.1:18777/mcp
    ```
 
@@ -52,7 +61,7 @@ When installing UnrealMCP for a user, follow this procedure:
 2. Obtain the latest named release asset matching `UnrealMCP-*-UE5.7-Win64-GitHub.zip`. Never substitute GitHub's automatic source archive.
 3. Ask the user to close Unreal Editor before replacing binaries. Do not overwrite an active plugin installation.
 4. Inspect the archive before extraction and verify that it contains `Plugins/ModelContextProtocol/ModelContextProtocol.uplugin` and `Plugins/ModelContextProtocol/Binaries/Win64/UnrealEditor-ModelContextProtocol.dll`.
-5. Replace the complete `<Project>/Plugins/ModelContextProtocol` directory with the archive's plugin directory. When migrating from 0.3.x or earlier, remove `<Project>/Plugins/UnrealMCP` so the legacy and new plugin identifiers cannot load together. Preserve unrelated plugins and project files.
+5. Replace the complete `<Project>/Plugins/ModelContextProtocol` directory with the archive's plugin directory. When migrating from 0.3.x or earlier, remove `<Project>/Plugins/UnrealMCP` so the legacy and new plugin identifiers cannot load together. Preserve unrelated plugins and project files. If editing the `.uproject` directly, preserve its other entries and use `{ "Name": "ModelContextProtocol", "Enabled": true, "SupportedTargetPlatforms": ["Win64"] }` for this plugin reference.
 6. Following the current agent's own MCP configuration conventions, register a Streamable HTTP server named `unreal` with URL `http://127.0.0.1:18777/mcp` in that agent's **project-scoped MCP list**. Do not register it at user or global scope, and do not overwrite unrelated project MCP entries. Set the tool timeout to 3600 seconds if the agent supports that setting.
 7. Tell the user to enable **MCP for Unreal Editor** and **Python Editor Script Plugin**, then restart Unreal Editor.
 8. After Unreal Editor restarts, call:
@@ -63,6 +72,16 @@ When installing UnrealMCP for a user, follow this procedure:
 
    A ready server reports `ok: true`, `is_game_thread: true`, and `python_loaded: true`.
 9. Verify `tools/list` exposes `unreal` and that the host presents it as a directly callable tool. If the host does not refresh project MCP tools, reconnect/restart the host. For diagnostics from Git Bash, use `scripts/unreal-mcp.sh --list`; the helper avoids hand-written JSON-RPC envelopes but is not required at runtime.
+
+### Build from source with Git Bash
+
+The named GitHub Release ZIP is the preferred installer. To build a checkout locally on Windows, run from Git Bash:
+
+```bash
+scripts/build-plugin.sh --engine-root 'C:/Program Files/Epic Games/UE_5.7'
+```
+
+The script prints its fresh package directory under `artifacts/`. It searches the selected UE installation for the newest bundled `Engine/Binaries/ThirdParty/DotNet/*/win-x64/dotnet.exe`, places that runtime first on `PATH`, sets `DOTNET_ROOT`, and disables multilevel lookup before invoking `RunUAT.sh BuildPlugin`. This prevents an unrelated system `dotnet` from being selected without `Microsoft.WindowsDesktop.App 8.x`. Use `--output PATH` for a specific fresh directory or `UE_DOTNET_ROOT` to override bundled runtime discovery for diagnostics.
 
 ## MCP Toolset
 

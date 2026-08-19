@@ -27,10 +27,19 @@ MCP 客户端连接期间，必须保持 Unreal Editor 已启动并打开目标�
          └─ Binaries/Win64/UnrealEditor-ModelContextProtocol.dll
    ```
 
-4. 打开工程，在 **Edit → Plugins** 中启用 **MCP for Unreal Editor** 和 **Python Editor Script Plugin**，然后重启 Unreal Editor。
+4. 打开工程，在 **Edit → Plugins** 中启用 **MCP for Unreal Editor** 和 **Python Editor Script Plugin**，然后重启 Unreal Editor。如果安装器或源码变更直接在 `.uproject` 中启用插件，应明确填写 Win64 目标，避免 UE 5.7 报告工程引用的目标平台为空：
+
+   ```json
+   {
+     "Name": "ModelContextProtocol",
+     "Enabled": true,
+     "SupportedTargetPlatforms": ["Win64"]
+   }
+   ```
+
 5. 将 MCP 端点添加到 Codex：
 
-   ```powershell
+   ```bash
    codex mcp add unreal --url http://127.0.0.1:18777/mcp
    ```
 
@@ -52,7 +61,7 @@ MCP 客户端连接期间，必须保持 Unreal Editor 已启动并打开目标�
 2. 获取最新的命名发布附件 `UnrealMCP-*-UE5.7-Win64-GitHub.zip`，绝不能用 GitHub 自动生成的源码压缩包代替。
 3. 替换二进制文件前，让用户关闭 Unreal Editor。不要覆盖正在使用的插件。
 4. 解压前检查压缩包，确认包含 `Plugins/ModelContextProtocol/ModelContextProtocol.uplugin` 和 `Plugins/ModelContextProtocol/Binaries/Win64/UnrealEditor-ModelContextProtocol.dll`。
-5. 用压缩包中的插件目录完整替换 `<Project>/Plugins/ModelContextProtocol`。从 0.3.x 或更早版本迁移时，删除 `<Project>/Plugins/UnrealMCP`，避免新旧插件标识同时加载。保留其他插件和工程文件不变。
+5. 用压缩包中的插件目录完整替换 `<Project>/Plugins/ModelContextProtocol`。从 0.3.x 或更早版本迁移时，删除 `<Project>/Plugins/UnrealMCP`，避免新旧插件标识同时加载。保留其他插件和工程文件不变。如果需要直接编辑 `.uproject`，保留其中其他条目，并使用 `{ "Name": "ModelContextProtocol", "Enabled": true, "SupportedTargetPlatforms": ["Win64"] }` 作为本插件引用。
 6. 按当前 agent 自身的 MCP 配置规范，将名为 `unreal`、URL 为 `http://127.0.0.1:18777/mcp` 的 Streamable HTTP 服务注册到该 agent 的 **project scope MCP list**。不要注册到 user scope 或 global scope，也不要覆盖工程内其他 MCP 条目。如果该 agent 支持工具超时设置，将其设为 3600 秒。
 7. 告知用户启用 **MCP for Unreal Editor** 和 **Python Editor Script Plugin**，然后重启 Unreal Editor。
 8. Unreal Editor 重启后调用：
@@ -63,6 +72,16 @@ MCP 客户端连接期间，必须保持 Unreal Editor 已启动并打开目标�
 
    就绪的服务应返回 `ok: true`、`is_game_thread: true` 和 `python_loaded: true`。
 9. 验证 `tools/list` 暴露了 `unreal`，并确认 host 将它显示为可直接调用的工具。如果 host 没有刷新 project MCP 工具，请重连或重启 host。需要从 Git Bash 排查时，可运行 `scripts/unreal-mcp.sh --list`；这个辅助脚本只用于避免手写 JSON-RPC 信封，并非产品运行时依赖。
+
+### 使用 Git Bash 从源码构建
+
+命名的 GitHub Release ZIP 是首选安装包。如果需要在 Windows 上从源码 checkout 本地构建，请在 Git Bash 中运行：
+
+```bash
+scripts/build-plugin.sh --engine-root 'C:/Program Files/Epic Games/UE_5.7'
+```
+
+脚本会打印 `artifacts/` 下新建的插件包目录。它会在所选 UE 安装中查找最新的 `Engine/Binaries/ThirdParty/DotNet/*/win-x64/dotnet.exe`，将该运行时放到 `PATH` 最前，设置 `DOTNET_ROOT`、关闭 multilevel lookup，再调用 `RunUAT.sh BuildPlugin`。这样可避免误选缺少 `Microsoft.WindowsDesktop.App 8.x` 的系统 `dotnet`。可用 `--output PATH` 指定一个尚不存在的输出目录；`UE_DOTNET_ROOT` 仅用于诊断时覆盖自动探测。
 
 ## MCP 提供的工具集
 

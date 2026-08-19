@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Shell entry points must remain executable by Git Bash after Windows checkout.
+*.sh text eol=lf

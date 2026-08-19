@@ -32,7 +32,11 @@ try {
         Description = 'Generated host for the UnrealMCP Streamable HTTP end-to-end test.'
         AdditionalPluginDirectories = @($pluginPackage)
         Plugins = @(
-            [ordered]@{ Name = 'ModelContextProtocol'; Enabled = $true },
+            [ordered]@{
+                Name = 'ModelContextProtocol'
+                Enabled = $true
+                SupportedTargetPlatforms = @('Win64')
+            },
             [ordered]@{ Name = 'PythonScriptPlugin'; Enabled = $true }
         )
     }

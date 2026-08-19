@@ -25,6 +25,13 @@ const packageMetadata = JSON.parse(source("../package.json")) as { version: stri
 const pluginDescriptor = JSON.parse(
   source("../ModelContextProtocol/ModelContextProtocol.uplugin"),
 ) as { Version: number; VersionName: string };
+const hostProject = JSON.parse(source("../UE57MCPTest.uproject")) as {
+  Plugins: Array<{
+    Name: string;
+    Enabled: boolean;
+    SupportedTargetPlatforms?: string[];
+  }>;
+};
 
 function source(relativePath: string): string {
   return readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), "utf8");
@@ -48,6 +55,46 @@ describe("in-editor MCP metadata", () => {
     );
     expect(source("../scripts/build-fab-package.ps1")).toContain(
       `UnrealMCP-${pluginDescriptor.VersionName}-UE5.7-Win64.zip`,
+    );
+
+    const releaseAssetTemplate = 'UnrealMCP-$version-UE5.7-Win64-GitHub.zip';
+    expect(source("../.github/workflows/release.yml")).toContain(releaseAssetTemplate);
+    expect(source("../scripts/package-prebuilt-github-release.ps1")).toContain(
+      releaseAssetTemplate,
+    );
+    expect(source("../README.md")).toContain("UnrealMCP-...-UE5.7-Win64-GitHub.zip");
+    expect(source("../README.zh-CN.md")).toContain(
+      "UnrealMCP-...-UE5.7-Win64-GitHub.zip",
+    );
+  });
+
+  it("provides a Git Bash build path pinned to UE-bundled .NET", () => {
+    const buildScript = source("../scripts/build-plugin.sh");
+    expect(buildScript).toContain("Engine/Binaries/ThirdParty/DotNet");
+    expect(buildScript).toContain("export DOTNET_ROOT");
+    expect(buildScript).toContain("export DOTNET_MULTILEVEL_LOOKUP=0");
+    expect(buildScript).toContain("Microsoft.WindowsDesktop.App 8");
+    expect(buildScript).toContain('"$uat" BuildPlugin');
+    expect(buildScript).toContain("UnrealEditor.modules");
+    expect(source("../.gitattributes")).toContain("*.sh text eol=lf");
+    expect(source("../README.md")).toContain("scripts/build-plugin.sh --engine-root");
+    expect(source("../README.zh-CN.md")).toContain("scripts/build-plugin.sh --engine-root");
+  });
+
+  it("declares Win64 on explicit project plugin references", () => {
+    const pluginReference = hostProject.Plugins.find(
+      (plugin) => plugin.Name === "ModelContextProtocol",
+    );
+    expect(pluginReference).toMatchObject({
+      Enabled: true,
+      SupportedTargetPlatforms: ["Win64"],
+    });
+    expect(source("../scripts/test-http-e2e.ps1")).toContain(
+      "SupportedTargetPlatforms = @('Win64')",
+    );
+    expect(source("../README.md")).toContain('"SupportedTargetPlatforms": ["Win64"]');
+    expect(source("../README.zh-CN.md")).toContain(
+      '"SupportedTargetPlatforms": ["Win64"]',
     );
   });
 
