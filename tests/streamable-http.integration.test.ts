@@ -35,7 +35,18 @@ type JsonRpcResponse = {
         commands_succeeded?: number;
         failed_command_index?: number;
         matched?: number;
-        results?: Array<{ id?: string; kind?: string; error?: string }>;
+        results?: Array<{
+          id?: string;
+          kind?: string;
+          error?: string;
+          value?: {
+            ok?: boolean;
+            errors?: number;
+            saved?: boolean;
+            node?: GraphNode;
+            nodes?: GraphNode[];
+          };
+        }>;
         plugins?: Array<{
           name: string;
           enabled: boolean;
@@ -47,6 +58,22 @@ type JsonRpcResponse = {
       };
     };
   };
+};
+
+type GraphPin = {
+  id: string;
+  name: string;
+  direction: "input" | "output";
+  category: string;
+  index?: number;
+  links: Array<{ node_id: string; pin_id: string }>;
+};
+
+type GraphNode = {
+  id: string;
+  class: string;
+  title: string;
+  pins: GraphPin[];
 };
 
 let rpcId = 100;
@@ -360,6 +387,102 @@ describe("in-editor Streamable HTTP MCP server", () => {
         code: "import builtins; del builtins._ue_mcp_rollback_probe",
       }],
     });
+  });
+
+  httpIt("authors, compiles, saves, and re-inspects visible Blueprint graph logic", async () => {
+    const session = "bdbdbdbd-bdbd-4dbd-8dbd-bdbdbdbdbdbd";
+    const suffix = Date.now().toString(36);
+    const assetName = `BP_MCPGraph_${suffix}`;
+    const packagePath = `/Game/UnrealMCPTests/${assetName}`;
+    const objectPath = `${packagePath}.${assetName}`;
+
+    const executeGraph = async (command: Record<string, unknown>) => {
+      const response = await rawToolCall(session, {
+        action: "execute",
+        transaction: true,
+        commands: [{ kind: "blueprint_graph", blueprint_path: objectPath, ...command }],
+      });
+      expect(response.result?.isError).toBe(false);
+      const result = response.result?.structuredContent?.data?.results?.[0];
+      expect(result?.kind).toBe("blueprint_graph");
+      expect(result?.value?.ok).toBe(true);
+      return result!.value!;
+    };
+
+    try {
+      const create = await rawToolCall(session, {
+        action: "execute",
+        transaction: false,
+        commands: [{
+          kind: "python",
+          mode: "exec",
+          code: [
+            "folder = '/Game/UnrealMCPTests'",
+            `name = '${assetName}'`,
+            "unreal.EditorAssetLibrary.make_directory(folder)",
+            "factory = unreal.BlueprintFactory()",
+            "factory.set_editor_property('parent_class', unreal.Actor)",
+            "asset = unreal.AssetToolsHelpers.get_asset_tools().create_asset(name, folder, unreal.Blueprint, factory)",
+            "assert asset is not None",
+            "unreal.BlueprintEditorLibrary.compile_blueprint(asset)",
+            "assert unreal.EditorAssetLibrary.save_loaded_asset(asset)",
+          ].join("; "),
+        }],
+      });
+      expect(create.result?.isError).toBe(false);
+
+      const event = await executeGraph({
+        operation: "add_event",
+        event_name: "ReceiveBeginPlay",
+        event_class: "/Script/Engine.Actor",
+        x: 0,
+        y: 0,
+      });
+      const call = await executeGraph({
+        operation: "add_function_call",
+        function_path: "/Script/Engine.KismetSystemLibrary.PrintString",
+        x: 320,
+        y: 0,
+      });
+      const eventNode = event.node!;
+      const callNode = call.node!;
+      const eventExec = eventNode.pins.find(
+        (pin) => pin.direction === "output" && pin.category === "exec",
+      );
+      const callExec = callNode.pins.find(
+        (pin) => pin.direction === "input" && pin.category === "exec",
+      );
+      expect(eventExec).toBeTruthy();
+      expect(callExec).toBeTruthy();
+
+      await executeGraph({
+        operation: "connect",
+        from_pin_id: eventExec!.id,
+        to_pin_id: callExec!.id,
+      });
+      const compiled = await executeGraph({ operation: "compile", save: true });
+      expect(compiled.errors).toBe(0);
+      expect(compiled.saved).toBe(true);
+
+      const inspected = await executeGraph({ operation: "inspect" });
+      const reloadedEvent = inspected.nodes?.find((node) => node.id === eventNode.id);
+      const reloadedCall = inspected.nodes?.find((node) => node.id === callNode.id);
+      expect(reloadedEvent).toBeTruthy();
+      expect(reloadedCall).toBeTruthy();
+      expect(reloadedEvent?.pins.flatMap((pin) => pin.links))
+        .toContainEqual(expect.objectContaining({ node_id: callNode.id }));
+    }
+    finally {
+      await rawToolCall(session, {
+        action: "execute",
+        transaction: false,
+        commands: [{
+          kind: "python",
+          mode: "eval",
+          code: `unreal.EditorAssetLibrary.delete_asset('${packagePath}')`,
+        }],
+      });
+    }
   });
 
 });

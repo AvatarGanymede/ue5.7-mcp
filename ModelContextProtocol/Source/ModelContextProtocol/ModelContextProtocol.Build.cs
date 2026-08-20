@@ -8,11 +8,13 @@ public class ModelContextProtocol : ModuleRules
 
         PublicDependencyModuleNames.AddRange(new[]
         {
-            "Core"
+            "Core",
+            "DeveloperSettings"
         });
 
         PrivateDependencyModuleNames.AddRange(new[]
         {
+            "BlueprintGraph",
             "CoreUObject",
             "Engine",
             "HTTPServer",

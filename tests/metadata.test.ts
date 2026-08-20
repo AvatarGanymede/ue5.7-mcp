@@ -14,7 +14,13 @@ type Metadata = {
     };
   };
   official_all_toolsets_plugins: string[];
-  capabilities: Array<{ id: string; official_plugins: string[] }>;
+  capabilities: Array<{
+    id: string;
+    official_plugins: string[];
+    summary?: string;
+    backend?: string;
+    recipes?: Array<{ name: string; command?: Record<string, unknown>; code?: string }>;
+  }>;
 };
 
 const metadataPath = fileURLToPath(
@@ -66,6 +72,28 @@ describe("in-editor MCP metadata", () => {
     expect(source("../README.zh-CN.md")).toContain(
       "UnrealMCP-...-UE5.7-Win64-GitHub.zip",
     );
+  });
+
+  it("exposes a project setting for the MCP server port", () => {
+    const settingsHeader = source(
+      "../ModelContextProtocol/Source/ModelContextProtocol/Public/ModelContextProtocolSettings.h",
+    );
+    expect(settingsHeader).toContain("UCLASS(Config=ModelContextProtocol, DefaultConfig");
+    expect(settingsHeader).toContain('return TEXT("Plugins")');
+    expect(settingsHeader).toContain("ConfigRestartRequired=true");
+    expect(settingsHeader).toContain("int32 Port = 18777");
+
+    const serverSource = source(
+      "../ModelContextProtocol/Source/ModelContextProtocol/Private/UnrealMCPServer.cpp",
+    );
+    expect(serverSource).toContain("GetDefault<UModelContextProtocolSettings>()");
+    expect(serverSource.indexOf("Settings->Port")).toBeLessThan(
+      serverSource.indexOf('GetEnvironmentVariable(TEXT("UE_MCP_PORT"))'),
+    );
+    expect(source("../ModelContextProtocol/Source/ModelContextProtocol/ModelContextProtocol.Build.cs"))
+      .toContain('"DeveloperSettings"');
+    expect(source("../ModelContextProtocol/Config/DefaultModelContextProtocol.ini"))
+      .toContain("[/Script/ModelContextProtocol.ModelContextProtocolSettings]\nPort=18777");
   });
 
   it("provides a Git Bash build path pinned to UE-bundled .NET", () => {
@@ -156,5 +184,53 @@ describe("in-editor MCP metadata", () => {
       | undefined;
     expect(actorWorld?.recipes?.map((recipe) => recipe.name)).toContain("trigger_pawn_overlap");
     expect(JSON.stringify(actorWorld?.recipes)).toContain("CollisionResponseType.ECR_OVERLAP");
+  });
+
+  it("separates Blueprint defaults from native visible K2 graph authoring", () => {
+    const execute = metadata.tool.inputSchema.oneOf.find(
+      (branch) => branch.properties?.action?.const === "execute",
+    );
+    const commandVariants = execute?.properties?.commands?.items as {
+      oneOf?: Array<{ properties?: Record<string, Record<string, unknown>> }>;
+    } | undefined;
+    const graphCommand = commandVariants?.oneOf?.find(
+      (branch) => branch.properties?.kind?.const === "blueprint_graph",
+    );
+    const operations = graphCommand?.properties?.operation?.enum as string[] | undefined;
+    expect(operations).toEqual(expect.arrayContaining([
+      "inspect",
+      "add_event",
+      "add_custom_event",
+      "add_function_call",
+      "add_variable_get",
+      "add_variable_set",
+      "connect",
+      "disconnect",
+      "set_pin_default",
+      "remove_node",
+      "move_node",
+      "set_comment",
+      "compile",
+    ]));
+
+    const blueprint = metadata.capabilities.find((entry) => entry.id === "blueprint");
+    expect(blueprint?.backend).toBe("python+native-blueprint-graph");
+    expect(blueprint?.summary).toContain("component configuration alone is not Event Graph logic");
+    expect(blueprint?.summary).toContain("Timeline track authoring is not supported");
+    expect(blueprint?.recipes?.map((recipe) => recipe.name)).toEqual(
+      expect.arrayContaining(["inspect_event_graph", "add_begin_play", "compile_and_save"]),
+    );
+
+    const graphSource = source(
+      "../ModelContextProtocol/Source/ModelContextProtocol/Private/BlueprintGraphOperations.cpp",
+    );
+    expect(graphSource).toContain("UBlueprintFunctionNodeSpawner::Create");
+    expect(graphSource).toContain("UBlueprintVariableNodeSpawner::CreateFromMemberOrParam");
+    expect(graphSource).toContain("MarkBlueprintDirtyFromNewNode");
+    expect(graphSource).toContain("TryCreateConnection");
+    expect(source("../ModelContextProtocol/Source/ModelContextProtocol/ModelContextProtocol.Build.cs"))
+      .toContain('"BlueprintGraph"');
+    expect(source("../README.md")).toContain("BlueprintGraphEditor");
+    expect(source("../README.zh-CN.md")).toContain("BlueprintGraphEditor");
   });
 });

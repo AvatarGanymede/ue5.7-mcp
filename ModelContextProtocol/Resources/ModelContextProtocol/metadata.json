@@ -56,6 +56,44 @@
                   {
                     "type": "object",
                     "properties": {
+                      "kind": { "const": "blueprint_graph", "description": "Inspect or author visible K2 Blueprint graph logic through a controlled native UE 5.7 backend modeled after UE 5.8 BlueprintGraphEditor." },
+                      "operation": { "enum": ["inspect", "add_event", "add_custom_event", "add_function_call", "add_variable_get", "add_variable_set", "connect", "disconnect", "set_pin_default", "remove_node", "move_node", "set_comment", "compile"] },
+                      "blueprint_path": { "type": "string", "minLength": 1, "description": "Blueprint object or package path, for example /Game/Blueprints/BP_Platform.BP_Platform." },
+                      "graph": { "type": "string", "description": "Graph name; omit for the main Event Graph." },
+                      "label": { "type": "string" },
+                      "node_id": { "type": "string", "format": "uuid" },
+                      "pin_id": { "type": "string", "format": "uuid" },
+                      "pin_name": { "type": "string" },
+                      "pin_direction": { "enum": ["input", "output"] },
+                      "pin_index": { "type": "integer", "minimum": 0 },
+                      "from_node_id": { "type": "string", "format": "uuid" },
+                      "from_pin_id": { "type": "string", "format": "uuid" },
+                      "from_pin_name": { "type": "string" },
+                      "from_pin_direction": { "enum": ["input", "output"] },
+                      "from_pin_index": { "type": "integer", "minimum": 0 },
+                      "to_node_id": { "type": "string", "format": "uuid" },
+                      "to_pin_id": { "type": "string", "format": "uuid" },
+                      "to_pin_name": { "type": "string" },
+                      "to_pin_direction": { "enum": ["input", "output"] },
+                      "to_pin_index": { "type": "integer", "minimum": 0 },
+                      "event_name": { "type": "string" },
+                      "event_class": { "type": "string" },
+                      "function_path": { "type": "string" },
+                      "function_class": { "type": "string" },
+                      "function_name": { "type": "string" },
+                      "variable_name": { "type": "string" },
+                      "default_value": { "type": "string" },
+                      "comment": { "type": "string" },
+                      "x": { "type": "integer" },
+                      "y": { "type": "integer" },
+                      "save": { "type": "boolean", "default": false }
+                    },
+                    "required": ["kind", "operation", "blueprint_path"],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
                       "kind": { "const": "wait" },
                       "frames": { "type": "integer", "minimum": 1, "maximum": 18000, "description": "Number of Game Thread ticks to yield before continuing. Requires run=async." },
                       "label": { "type": "string" }
@@ -125,7 +163,11 @@
       { "name": "trigger_pawn_overlap", "mode": "exec", "code": "collision = trigger.get_collision_component(); collision.set_collision_response_to_all_channels(unreal.CollisionResponseType.ECR_IGNORE); collision.set_collision_response_to_channel(unreal.CollisionChannel.ECC_PAWN, unreal.CollisionResponseType.ECR_OVERLAP)" }
     ] },
     { "id": "asset", "title": "Assets and Content Browser", "summary": "Query, create, import, duplicate, rename, save, export, and delete assets and folders.", "official_plugins": ["EditorToolset"], "backend": "python", "keywords": ["asset", "content browser", "registry", "import", "rename", "save"], "examples": ["unreal.AssetRegistryHelpers", "unreal.EditorAssetLibrary", "unreal.AssetToolsHelpers"] },
-    { "id": "blueprint", "title": "Blueprints and reflection", "summary": "Create and inspect Blueprint assets, classes, variables and components; compile and validate them.", "official_plugins": ["EditorToolset"], "backend": "python", "keywords": ["blueprint", "graph", "class", "component", "compile", "reflection"], "examples": ["unreal.BlueprintEditorLibrary", "get_editor_property", "set_editor_property"] },
+    { "id": "blueprint", "title": "Blueprint assets, defaults, and K2 graphs", "summary": "Use UE Python for Blueprint assets, classes, variables, components, and defaults. Use the native blueprint_graph command for visible K2 Event Graph nodes, pins, connections, compilation, and saving; component configuration alone is not Event Graph logic. Timeline track authoring is not supported.", "official_plugins": ["EditorToolset"], "backend": "python+native-blueprint-graph", "keywords": ["blueprint", "event graph", "k2", "node", "pin", "connection", "class", "component", "compile", "reflection", "visible logic"], "examples": ["unreal.BlueprintEditorLibrary", "blueprint_graph.inspect", "blueprint_graph.add_function_call", "blueprint_graph.connect", "blueprint_graph.compile"], "recipes": [
+      { "name": "inspect_event_graph", "command": { "kind": "blueprint_graph", "operation": "inspect", "blueprint_path": "/Game/Blueprints/BP_Example.BP_Example" } },
+      { "name": "add_begin_play", "command": { "kind": "blueprint_graph", "operation": "add_event", "blueprint_path": "/Game/Blueprints/BP_Example.BP_Example", "event_name": "ReceiveBeginPlay", "event_class": "/Script/Engine.Actor", "x": 0, "y": 0 } },
+      { "name": "compile_and_save", "command": { "kind": "blueprint_graph", "operation": "compile", "blueprint_path": "/Game/Blueprints/BP_Example.BP_Example", "save": true } }
+    ] },
     { "id": "ai-navigation", "title": "AI and navigation", "summary": "Inspect AI systems, behavior assets, controllers, perception, and navigation data.", "official_plugins": ["AIModuleToolset"], "backend": "python", "keywords": ["ai", "navigation", "navmesh", "behavior tree", "blackboard", "perception"], "examples": ["unreal.AISystem", "unreal.NavigationSystemV1"] },
     { "id": "animation", "title": "Animation and Control Rig", "summary": "Inspect and edit animations, rigs, keys, bindings, sections, and Sequencer data.", "official_plugins": ["AnimationAssistantToolset", "SequencerAnimMixerToolset"], "backend": "python", "keywords": ["animation", "control rig", "sequencer", "keyframe", "binding", "single node", "jump", "fall", "land"], "examples": ["unreal.ControlRigSequencerLibrary", "unreal.SequencerTools"], "recipes": [
       { "name": "skeletal_mesh_current_animation", "mode": "eval", "code": "skeletal_mesh_component.get_anim_instance().get_animation_asset()" }

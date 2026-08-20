@@ -1,9 +1,11 @@
 #include "UnrealMCPServer.h"
 
 #include "Async/Async.h"
+#include "BlueprintGraphOperations.h"
 #include "Containers/Ticker.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+#include "ModelContextProtocolSettings.h"
 #include "Editor.h"
 #include "Engine/Engine.h"
 #include "HttpPath.h"
@@ -39,7 +41,7 @@ namespace
     const TCHAR* LatestProtocolVersion = TEXT("2026-07-28");
     const TCHAR* ServerInstructions =
         TEXT("One tool is exposed. Use action=discover for Unreal API starting points and runnable recipes, then action=execute ")
-        TEXT("with a compact Python/console batch. Use eval for queries, exec for mutations, and run=async with wait plus task.get ")
+        TEXT("with a compact Python/console/blueprint_graph batch. Use eval for queries, blueprint_graph for visible K2 logic, and run=async with wait plus task.get ")
         TEXT("for cross-Tick runtime checks. UObject and editor calls run on Unreal's Game Thread. Failed exec/console commands may ")
         TEXT("leave partial changes even when transaction=true; inspect partial_changes_possible.");
 
@@ -341,6 +343,18 @@ bool FUnrealMCPServer::Start()
     Lifetime = MakeShared<FThreadSafeBool, ESPMode::ThreadSafe>(true);
     RequestQueueDepth = MakeShared<FThreadSafeCounter, ESPMode::ThreadSafe>();
 
+    const UModelContextProtocolSettings* Settings = GetDefault<UModelContextProtocolSettings>();
+    if (!Settings || Settings->Port <= 0 || Settings->Port > 65535)
+    {
+        UE_LOG(
+            LogModelContextProtocol,
+            Error,
+            TEXT("Invalid MCP server port %d in Project Settings > Plugins > MCP for Unreal Editor"),
+            Settings ? Settings->Port : 0);
+        return false;
+    }
+    Port = static_cast<uint32>(Settings->Port);
+
     FString PortValue = FPlatformMisc::GetEnvironmentVariable(TEXT("UE_MCP_PORT"));
     if (PortValue.IsEmpty())
     {
@@ -348,8 +362,8 @@ bool FUnrealMCPServer::Start()
     }
     if (!PortValue.IsEmpty())
     {
-        const int32 ParsedPort = FCString::Atoi(*PortValue);
-        if (ParsedPort <= 0 || ParsedPort > 65535)
+        int32 ParsedPort = 0;
+        if (!LexTryParseString(ParsedPort, *PortValue) || ParsedPort <= 0 || ParsedPort > 65535)
         {
             UE_LOG(LogModelContextProtocol, Error, TEXT("Invalid UE_MCP_PORT '%s'"), *PortValue);
             return false;
@@ -1232,12 +1246,41 @@ TSharedRef<FJsonObject> FUnrealMCPServer::ExecuteCommand(
         return Result;
     }
 
+    if (Kind.Equals(TEXT("blueprint_graph"), ESearchCase::IgnoreCase))
+    {
+        FString Operation;
+        CommandObject->TryGetStringField(TEXT("operation"), Operation);
+        const bool bMayMutate = Operation != TEXT("inspect");
+        const bool bRecordTransaction = bUseTransaction && bMayMutate;
+        TUniquePtr<FScopedTransaction> Transaction;
+        if (bRecordTransaction)
+        {
+            Transaction = MakeUnique<FScopedTransaction>(FText::Format(
+                NSLOCTEXT("ModelContextProtocol", "BlueprintGraphTransaction", "MCP Blueprint graph command {0}"),
+                FText::AsNumber(Index + 1)));
+        }
+
+        bool bSideEffectsPossible = false;
+        TSharedRef<FJsonObject> Value = UnrealMCPBlueprintGraph::Execute(
+            CommandObject.ToSharedRef(), bSucceeded, bSideEffectsPossible);
+        TSharedRef<FJsonObject> Result = MakeCommandResult(Index, TEXT("blueprint_graph"), Label, bSucceeded);
+        Result->SetBoolField(TEXT("side_effects_possible"), bSideEffectsPossible);
+        Result->SetBoolField(TEXT("transaction_recorded"), bRecordTransaction);
+        Result->SetObjectField(TEXT("value"), Value);
+        FString Error;
+        if (!bSucceeded && Value->TryGetStringField(TEXT("error"), Error))
+        {
+            Result->SetStringField(TEXT("error"), Error);
+        }
+        return Result;
+    }
+
     TSharedRef<FJsonObject> Result = MakeCommandResult(Index, Kind, Label, false);
     Result->SetBoolField(TEXT("side_effects_possible"), false);
     Result->SetBoolField(TEXT("transaction_recorded"), false);
     Result->SetStringField(TEXT("error"), Kind.Equals(TEXT("wait"), ESearchCase::IgnoreCase)
         ? TEXT("wait commands require run=async")
-        : TEXT("Unsupported command kind. Expected 'python', 'console', or asynchronous 'wait'."));
+        : TEXT("Unsupported command kind. Expected 'python', 'console', 'blueprint_graph', or asynchronous 'wait'."));
     return Result;
 }
 
