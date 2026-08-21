@@ -2,7 +2,7 @@
   "version": "0.6.1",
   "engine_version": "5.7.4",
   "dll_sha256": "36629a41a36a14425488bb6629a8473bc566026364886048cf311ec919dcc437",
-  "modules_sha256": "08692ed235f824d115736ce47fa07155245d2036f9efd2f18fbb4c587ef271b8",
+  "modules_sha256": "3d21a47f0eaf1f79a523df42e35f5590fd94504e1684a62ff02fa0fba4e747d1",
   "source_sha256": "c80774b2532e438e30387143e2094995b5f391c8751eb1c085937235a80d9487",
   "source_hash_algorithm": "git-clean-blob-list-sha256-v1",
   "runtime_smoke": {

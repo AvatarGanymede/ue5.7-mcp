@@ -3,3 +3,8 @@
 
 # Shell entry points must remain executable by Git Bash after Windows checkout.
 *.sh text eol=lf
+
+# Prebuilt release outputs: keep the JSON module manifest stable across hosts
+# and never apply text conversion to the compiled DLL.
+*.modules text eol=lf
+*.dll -text
