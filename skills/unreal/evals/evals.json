@@ -1,0 +1,29 @@
+{
+  "skill_name": "unreal",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "在当前打开的 UE 5.7 编辑器中找到 /Game/Blueprints/BP_Door，给 BeginPlay 后面添加一条 Print String，内容为 Door ready，编译保存并确认连线存在。",
+      "expected_output": "Agent checks health, inspects the Blueprint graph, uses returned pin IDs to create and connect the function call, compiles/saves, re-inspects, and reports verified results.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "调用我们工程 Content/Python/project_tools.py 里的 build_test_map('Arena01')，这个过程需要等编辑器两帧，然后确认 project_tools.is_map_ready('Arena01') 返回 true。",
+      "expected_output": "Agent uses an async execute batch, calls the project Python API, uses a two-frame wait rather than sleeping, reads data.task.id, polls data.task.state, and reports the final check from the task result.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "帮我看看当前关卡里有多少个 StaticMeshActor，只读检查，不要改任何东西。",
+      "expected_output": "Agent checks or reuses connection health, uses a read-only Python evaluation with transaction disabled, returns the observed count, and makes no mutation.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "我们经常要按命名规则创建测试关卡并放置基础灯光，请把这个项目操作封装起来，让以后 Agent 可以稳定地通过 MCP 调用。",
+      "expected_output": "Agent recommends a narrowly scoped Content/Python helper with explicit parameters, validation and a verification query, avoids arbitrary-code entry points, and demonstrates calling the module through the existing unreal tool rather than registering a new MCP tool.",
+      "files": []
+    }
+  ]
+}
