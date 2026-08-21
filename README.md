@@ -1,4 +1,4 @@
-# UnrealMCP — native MCP for Unreal Engine 5.7
+# UnrealMCP — Native MCP for Unreal Engine 5.7
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
