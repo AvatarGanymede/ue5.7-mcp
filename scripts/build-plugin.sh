@@ -59,16 +59,39 @@ if [[ ! -d "$engine_root" ]]; then
 fi
 engine_root=$(cd "$engine_root" && pwd -P)
 
-plugin="$repository_root/ModelContextProtocol/ModelContextProtocol.uplugin"
 uat="$engine_root/Engine/Build/BatchFiles/RunUAT.sh"
-if [[ ! -f "$plugin" ]]; then
-  printf 'Plugin descriptor not found: %s\n' "$plugin" >&2
+source_plugin="$repository_root/ModelContextProtocol"
+if [[ ! -f "$source_plugin/ModelContextProtocol.uplugin" ]]; then
+  printf 'Plugin descriptor not found: %s\n' "$source_plugin/ModelContextProtocol.uplugin" >&2
   exit 1
 fi
 if [[ ! -f "$uat" ]]; then
   printf 'RunUAT.sh not found below engine root: %s\n' "$uat" >&2
   exit 1
 fi
+
+# BuildPlugin must never see repository Binaries or Intermediate. A fresh source
+# staging directory makes it impossible for a stale checked-in DLL to enter the
+# package without being produced by this invocation of UHT/UBT.
+source_staging_root=$(mktemp -d "${TMPDIR:-/tmp}/unrealmcp-build-source.XXXXXX")
+staged_plugin="$source_staging_root/ModelContextProtocol"
+mkdir -p "$staged_plugin"
+tar \
+  --exclude='./Binaries' \
+  --exclude='./Intermediate' \
+  --exclude='./DerivedDataCache' \
+  --exclude='./Saved' \
+  -C "$source_plugin" \
+  -cf - . | tar -C "$staged_plugin" -xf -
+plugin="$staged_plugin/ModelContextProtocol.uplugin"
+
+cleanup_source_staging() {
+  local temp_root=${TMPDIR:-/tmp}
+  if [[ -n "${source_staging_root:-}" && -d "$source_staging_root" && "$source_staging_root" == "$temp_root"/unrealmcp-build-source.* ]]; then
+    rm -rf -- "$source_staging_root"
+  fi
+}
+trap cleanup_source_staging EXIT
 
 if [[ -z "$output_directory" ]]; then
   output_directory="$repository_root/artifacts/ModelContextProtocol-build-$(date +%Y%m%d-%H%M%S)-$$"
@@ -83,6 +106,38 @@ if [[ -e "$output_directory" ]]; then
   exit 1
 fi
 
+uat_log_folder="$output_parent/.unrealmcp-uat-logs-$(basename "$output_directory")"
+user_profile_folder="$output_parent/.unrealmcp-userprofile-$(basename "$output_directory")"
+local_appdata_folder="$user_profile_folder/AppData/Local"
+roaming_appdata_folder="$user_profile_folder/AppData/Roaming"
+mkdir -p "$uat_log_folder" "$local_appdata_folder" "$roaming_appdata_folder"
+if command -v cygpath >/dev/null 2>&1; then
+  export uebp_LogFolder
+  export uebp_FinalLogFolder
+  uebp_LogFolder=$(cygpath -m "$uat_log_folder")
+  uebp_FinalLogFolder=$uebp_LogFolder
+  export LOCALAPPDATA
+  export APPDATA
+  export USERPROFILE
+  LOCALAPPDATA=$(cygpath -m "$local_appdata_folder")
+  APPDATA=$(cygpath -m "$roaming_appdata_folder")
+  USERPROFILE=$(cygpath -m "$user_profile_folder")
+else
+  export uebp_LogFolder="$uat_log_folder"
+  export uebp_FinalLogFolder="$uat_log_folder"
+  export LOCALAPPDATA="$local_appdata_folder"
+  export APPDATA="$roaming_appdata_folder"
+  export USERPROFILE="$user_profile_folder"
+fi
+
+# Use the standard parallel executor. UBA stores sessions in ProgramData by
+# default, which is undesirable on locked-down builders and unnecessary for a
+# small release plugin build.
+export UnrealBuildTool_BuildConfiguration__bAllowUBAExecutor=false
+export UnrealBuildTool_BuildConfiguration__bAllowXGE=false
+export UnrealBuildTool_BuildConfiguration__bAllowSNDBS=false
+export UnrealBuildTool_BuildConfiguration__bAllowFASTBuild=false
+
 if [[ -n "${UE_DOTNET_ROOT:-}" ]]; then
   dotnet_root=$(normalize_path "$UE_DOTNET_ROOT")
   [[ -d "$dotnet_root" ]] || { printf 'UE_DOTNET_ROOT not found: %s\n' "$dotnet_root" >&2; exit 1; }
@@ -94,7 +149,7 @@ else
     printf 'UE-bundled .NET directory was not found: %s\n' "$bundled_dotnet" >&2
     exit 1
   fi
-  dotnet_exe=$(find "$bundled_dotnet" -mindepth 2 -maxdepth 3 -type f -path '*/win-x64/dotnet.exe' -print 2>/dev/null | sort -V | tail -n 1)
+  dotnet_exe=$(/usr/bin/find "$bundled_dotnet" -mindepth 2 -maxdepth 3 -type f -path '*/win-x64/dotnet.exe' -print 2>/dev/null | /usr/bin/sort -V | /usr/bin/tail -n 1)
   if [[ -z "$dotnet_exe" ]]; then
     printf 'UE-bundled Win64 dotnet.exe was not found below: %s\n' "$bundled_dotnet" >&2
     exit 1
@@ -123,7 +178,7 @@ if [[ -z "$resolved_dotnet" ]]; then
   printf '%s\n' 'dotnet was not found after configuring UE_DOTNET_ROOT.' >&2
   exit 1
 fi
-if ! dotnet --list-runtimes | grep -q '^Microsoft.WindowsDesktop.App 8\.'; then
+if ! dotnet --list-runtimes | /usr/bin/grep -q '^Microsoft.WindowsDesktop.App 8\.'; then
   printf 'UE-bundled .NET lacks Microsoft.WindowsDesktop.App 8.x: %s\n' "$dotnet_root" >&2
   exit 1
 fi

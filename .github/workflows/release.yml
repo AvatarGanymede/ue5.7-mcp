@@ -16,8 +16,11 @@ concurrency:
 jobs:
   release:
     name: Publish a new plugin version
-    runs-on: windows-latest
-    timeout-minutes: 15
+    # GitHub-hosted runners do not contain Unreal Engine. Releases must run on
+    # the trusted Windows builder whose ue-5.7 label guarantees a full UE 5.7
+    # installation at C:/Program Files/Epic Games/UE_5.7.
+    runs-on: [self-hosted, Windows, X64, ue-5.7]
+    timeout-minutes: 45
 
     steps:
       - name: Check out source
@@ -65,16 +68,6 @@ jobs:
             }
           }
 
-          $requiredBinaries = @(
-            'ModelContextProtocol/Binaries/Win64/UnrealEditor-ModelContextProtocol.dll',
-            'ModelContextProtocol/Binaries/Win64/UnrealEditor.modules'
-          )
-          foreach ($path in $requiredBinaries) {
-            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-              throw "The release commit is missing prebuilt binary: $path"
-            }
-          }
-
           $zipName = "UnrealMCP-$version-UE5.7-Win64-GitHub.zip"
           $zipPath = Join-Path $env:GITHUB_WORKSPACE "artifacts/$zipName"
           'should_release=true' | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
@@ -82,11 +75,21 @@ jobs:
           "tag_exists=$($tagExists.ToString().ToLowerInvariant())" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
           "zip_path=$zipPath" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
 
-      - name: Package prebuilt plugin
+      - name: Build final GitHub asset from clean source
         if: steps.release.outputs.should_release == 'true'
-        shell: pwsh
+        shell: bash
         run: |
-          ./scripts/package-prebuilt-github-release.ps1 -OutputFile '${{ steps.release.outputs.zip_path }}'
+          bash ./scripts/build-github-package.sh \
+            --engine-root 'C:/Program Files/Epic Games/UE_5.7' \
+            --output '${{ steps.release.outputs.zip_path }}'
+
+      - name: Smoke test reflected settings from final ZIP
+        if: steps.release.outputs.should_release == 'true'
+        shell: bash
+        run: |
+          bash ./scripts/test-release-asset.sh \
+            --engine-root 'C:/Program Files/Epic Games/UE_5.7' \
+            --asset '${{ steps.release.outputs.zip_path }}'
 
       - name: Upload workflow artifact
         if: steps.release.outputs.should_release == 'true'

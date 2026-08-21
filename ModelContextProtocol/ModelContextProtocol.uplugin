@@ -1,7 +1,7 @@
 {
   "FileVersion": 3,
-  "Version": 8,
-  "VersionName": "0.6.0",
+  "Version": 9,
+  "VersionName": "0.6.1",
   "FriendlyName": "MCP for Unreal Editor",
   "Description": "In-editor Streamable HTTP MCP server for Unreal Engine 5.7.",
   "Category": "Editor",

@@ -63,11 +63,10 @@ describe("in-editor MCP metadata", () => {
       `UnrealMCP-${pluginDescriptor.VersionName}-UE5.7-Win64.zip`,
     );
 
-    const releaseAssetTemplate = 'UnrealMCP-$version-UE5.7-Win64-GitHub.zip';
-    expect(source("../.github/workflows/release.yml")).toContain(releaseAssetTemplate);
-    expect(source("../scripts/package-prebuilt-github-release.ps1")).toContain(
-      releaseAssetTemplate,
-    );
+    const releaseWorkflow = source("../.github/workflows/release.yml");
+    expect(releaseWorkflow).toContain('UnrealMCP-$version-UE5.7-Win64-GitHub.zip');
+    expect(releaseWorkflow).toContain("scripts/build-github-package.sh");
+    expect(releaseWorkflow).toContain("scripts/test-release-asset.sh");
     expect(source("../README.md")).toContain("UnrealMCP-...-UE5.7-Win64-GitHub.zip");
     expect(source("../README.zh-CN.md")).toContain(
       "UnrealMCP-...-UE5.7-Win64-GitHub.zip",
@@ -107,6 +106,28 @@ describe("in-editor MCP metadata", () => {
     expect(source("../.gitattributes")).toContain("*.sh text eol=lf");
     expect(source("../README.md")).toContain("scripts/build-plugin.sh --engine-root");
     expect(source("../README.zh-CN.md")).toContain("scripts/build-plugin.sh --engine-root");
+  });
+
+  it("builds and smoke-tests the final release asset without repository binaries", () => {
+    const buildScript = source("../scripts/build-plugin.sh");
+    expect(buildScript).toContain("--exclude='./Binaries'");
+    expect(buildScript).toContain("--exclude='./Intermediate'");
+
+    const packageScript = source("../scripts/build-github-package.sh");
+    expect(packageScript).toContain('"$repository_root/scripts/build-plugin.sh"');
+    expect(packageScript).toContain("tar --format zip");
+    expect(packageScript).not.toContain("$repository_root/ModelContextProtocol/Binaries");
+
+    const legacyPackageScript = source("../scripts/package-prebuilt-github-release.ps1");
+    expect(legacyPackageScript).toContain("Repository Binaries are not release inputs");
+    expect(legacyPackageScript).not.toContain("Copy-Item -LiteralPath $sourcePlugin");
+
+    const smokeScript = source("../scripts/test-release-asset.sh");
+    expect(smokeScript).toContain("unzip -q \"$asset\"");
+    expect(smokeScript).toContain("unreal.load_class(None, settings_path)");
+    expect(smokeScript).toContain('settings.get_editor_property("port")');
+    expect(smokeScript).toContain("unreal.ObjectIterator(unreal.Class)");
+    expect(smokeScript).toContain('"default_port": 18777');
   });
 
   it("declares Win64 on explicit project plugin references", () => {
