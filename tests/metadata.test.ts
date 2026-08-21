@@ -122,8 +122,9 @@ describe("in-editor MCP metadata", () => {
 
     const prebuiltPackageScript = source("../scripts/package-prebuilt-github-release.sh");
     expect(prebuiltPackageScript).toContain("ReleaseProvenance.json");
-    expect(prebuiltPackageScript).toContain("manifest.dll_sha256 === dllSha");
-    expect(prebuiltPackageScript).toContain("manifest.source_sha256 === sourceSha");
+    expect(prebuiltPackageScript).toContain('["DLL SHA-256", manifest.dll_sha256, dllSha]');
+    expect(prebuiltPackageScript).toContain('["source fingerprint", manifest.source_sha256, sourceSha]');
+    expect(prebuiltPackageScript).toContain("git-clean-blob-list-sha256-v1");
     expect(prebuiltPackageScript).toContain('cp "$dll" "$modules" "$provenance"');
 
     const smokeScript = source("../scripts/test-release-asset.sh");
@@ -255,7 +256,7 @@ describe("in-editor MCP metadata", () => {
     expect(graphSource).toContain("TryCreateConnection");
     expect(source("../ModelContextProtocol/Source/ModelContextProtocol/ModelContextProtocol.Build.cs"))
       .toContain('"BlueprintGraph"');
-    expect(source("../README.md")).toContain("BlueprintGraphEditor");
-    expect(source("../README.zh-CN.md")).toContain("BlueprintGraphEditor");
+    expect(source("../README.md")).toContain("BlueprintEditorLibrary");
+    expect(source("../README.zh-CN.md")).toContain("BlueprintEditorLibrary");
   });
 });

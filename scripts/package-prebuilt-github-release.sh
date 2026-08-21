@@ -73,9 +73,14 @@ dll_sha=$(/usr/bin/sha256sum "$dll" | /usr/bin/awk '{print $1}')
 modules_sha=$(/usr/bin/sha256sum "$modules" | /usr/bin/awk '{print $1}')
 source_sha=$(
   cd "$repository_root"
+  # Hash Git's canonical blobs rather than checkout bytes. This keeps the
+  # fingerprint stable when windows-latest checks text files out as CRLF.
   /usr/bin/find ModelContextProtocol/Source ModelContextProtocol/Config ModelContextProtocol/ModelContextProtocol.uplugin \
-    -type f -print0 | /usr/bin/sort -z | /usr/bin/xargs -0 /usr/bin/sha256sum | \
-    /usr/bin/sha256sum | /usr/bin/awk '{print $1}'
+    -type f -print0 | /usr/bin/sort -z |
+  while IFS= read -r -d '' file; do
+    blob=$(git hash-object --path="$file" "$file")
+    printf '%s\0%s\0' "$file" "$blob"
+  done | /usr/bin/sha256sum | /usr/bin/awk '{print $1}'
 )
 
 node -e '
@@ -83,15 +88,24 @@ node -e '
   const [manifestPath, version, dllSha, modulesSha, sourceSha] = process.argv.slice(1);
   const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
   const smoke = manifest.runtime_smoke || {};
-  const valid = manifest.version === version &&
-    manifest.dll_sha256 === dllSha &&
-    manifest.modules_sha256 === modulesSha &&
-    manifest.source_sha256 === sourceSha &&
-    smoke.class_path === "/Script/ModelContextProtocol.ModelContextProtocolSettings" &&
-    smoke.default_port === 18777 && smoke.enumerated === true &&
-    smoke.enumerated_count === 1 && smoke.is_developer_settings === true;
-  if (!valid) {
-    console.error("Release provenance does not match the current source, DLL, modules, and runtime smoke requirements.");
+  const checks = [
+    ["version", manifest.version, version],
+    ["DLL SHA-256", manifest.dll_sha256, dllSha],
+    ["modules SHA-256", manifest.modules_sha256, modulesSha],
+    ["source fingerprint", manifest.source_sha256, sourceSha],
+    ["source hash algorithm", manifest.source_hash_algorithm, "git-clean-blob-list-sha256-v1"],
+    ["settings class", smoke.class_path, "/Script/ModelContextProtocol.ModelContextProtocolSettings"],
+    ["default port", smoke.default_port, 18777],
+    ["class enumerated", smoke.enumerated, true],
+    ["enumerated class count", smoke.enumerated_count, 1],
+    ["UDeveloperSettings type", smoke.is_developer_settings, true],
+  ];
+  const failures = checks.filter(([, actual, expected]) => actual !== expected);
+  if (failures.length > 0) {
+    console.error("Release provenance validation failed:");
+    for (const [label, actual, expected] of failures) {
+      console.error(`- ${label}: manifest=${JSON.stringify(actual)}, actual=${JSON.stringify(expected)}`);
+    }
     process.exit(1);
   }
 ' "$provenance" "$version" "$dll_sha" "$modules_sha" "$source_sha"
