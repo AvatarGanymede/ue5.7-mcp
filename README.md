@@ -99,6 +99,12 @@ Use Python and `BlueprintEditorLibrary` for Blueprint assets, variables, compone
 
 Wait commands require async mode and never block the Game Thread. Transactions create Undo entries but are not atomic; failures, timeouts, and cancellation do not automatically roll back earlier changes.
 
+### Extend project capabilities
+
+Package project-specific operations as Python functions under `Content/Python`. When native code is required, expose the C++ API to Unreal Python with `UFUNCTION`. Tell the agent which module, function, and arguments to call; it will run them through the `unreal` tool's Python command, for example: `import project_tools; project_tools.build_level()`.
+
+This extends MCP capabilities without modifying the plugin or adding tools. Prefer narrowly scoped project APIs with stable parameters and safe repeat behavior.
+
 For direct diagnostics from Git Bash:
 
 ```bash

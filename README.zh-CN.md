@@ -99,6 +99,12 @@ Blueprint 资产、变量、组件和类默认值使用 Python 与 `BlueprintEdi
 
 等待命令只能用于异步模式，不会阻塞游戏线程。事务会创建 Undo 记录，但不具备原子性；失败、超时或取消不会自动回滚先前的修改。
 
+### 扩展项目能力
+
+推荐把项目专用操作封装为 Python 函数，放入工程的 `Content/Python`；需要原生能力时，用 `UFUNCTION` 将 C++ API 暴露给 Unreal Python。然后直接告诉 Agent 要调用的模块、函数和参数，Agent 会通过 `unreal` 的 Python 命令执行，例如：`import project_tools; project_tools.build_level()`。
+
+这种方式无需修改 MCP 插件或新增 Tool；请只暴露边界清晰、参数稳定且可安全重复调用的项目 API。
+
 需要从 Git Bash 直接排查时：
 
 ```bash
