@@ -11,16 +11,16 @@ permissions:
 
 concurrency:
   group: release-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   release:
     name: Publish a new plugin version
-    # GitHub-hosted runners do not contain Unreal Engine. Releases must run on
-    # the trusted Windows builder whose ue-5.7 label guarantees a full UE 5.7
-    # installation at C:/Program Files/Epic Games/UE_5.7.
-    runs-on: [self-hosted, Windows, X64, ue-5.7]
-    timeout-minutes: 45
+    # UE compilation and runtime smoke tests are performed locally before the
+    # prebuilt DLL and its provenance manifest are committed. CI only verifies
+    # those exact inputs, packages them, and publishes the release.
+    runs-on: windows-latest
+    timeout-minutes: 15
 
     steps:
       - name: Check out source
@@ -75,21 +75,12 @@ jobs:
           "tag_exists=$($tagExists.ToString().ToLowerInvariant())" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
           "zip_path=$zipPath" | Add-Content -LiteralPath $env:GITHUB_OUTPUT -Encoding utf8
 
-      - name: Build final GitHub asset from clean source
+      - name: Package locally built and verified DLL
         if: steps.release.outputs.should_release == 'true'
         shell: bash
         run: |
-          bash ./scripts/build-github-package.sh \
-            --engine-root 'C:/Program Files/Epic Games/UE_5.7' \
+          bash ./scripts/package-prebuilt-github-release.sh \
             --output '${{ steps.release.outputs.zip_path }}'
-
-      - name: Smoke test reflected settings from final ZIP
-        if: steps.release.outputs.should_release == 'true'
-        shell: bash
-        run: |
-          bash ./scripts/test-release-asset.sh \
-            --engine-root 'C:/Program Files/Epic Games/UE_5.7' \
-            --asset '${{ steps.release.outputs.zip_path }}'
 
       - name: Upload workflow artifact
         if: steps.release.outputs.should_release == 'true'

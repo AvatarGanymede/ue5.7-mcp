@@ -1,0 +1,14 @@
+{
+  "version": "0.6.1",
+  "engine_version": "5.7.4",
+  "dll_sha256": "36629a41a36a14425488bb6629a8473bc566026364886048cf311ec919dcc437",
+  "modules_sha256": "08692ed235f824d115736ce47fa07155245d2036f9efd2f18fbb4c587ef271b8",
+  "source_sha256": "b368306a454232d77207e62f782ab9ab3bcad5aae2f07e9b863099ce8fca7566",
+  "runtime_smoke": {
+    "class_path": "/Script/ModelContextProtocol.ModelContextProtocolSettings",
+    "default_port": 18777,
+    "enumerated": true,
+    "enumerated_count": 1,
+    "is_developer_settings": true
+  }
+}

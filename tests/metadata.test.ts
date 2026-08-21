@@ -65,8 +65,10 @@ describe("in-editor MCP metadata", () => {
 
     const releaseWorkflow = source("../.github/workflows/release.yml");
     expect(releaseWorkflow).toContain('UnrealMCP-$version-UE5.7-Win64-GitHub.zip');
-    expect(releaseWorkflow).toContain("scripts/build-github-package.sh");
-    expect(releaseWorkflow).toContain("scripts/test-release-asset.sh");
+    expect(releaseWorkflow).toContain("runs-on: windows-latest");
+    expect(releaseWorkflow).toContain("cancel-in-progress: true");
+    expect(releaseWorkflow).toContain("scripts/package-prebuilt-github-release.sh");
+    expect(releaseWorkflow).not.toContain("runs-on: [self-hosted");
     expect(source("../README.md")).toContain("UnrealMCP-...-UE5.7-Win64-GitHub.zip");
     expect(source("../README.zh-CN.md")).toContain(
       "UnrealMCP-...-UE5.7-Win64-GitHub.zip",
@@ -118,9 +120,11 @@ describe("in-editor MCP metadata", () => {
     expect(packageScript).toContain("tar --format zip");
     expect(packageScript).not.toContain("$repository_root/ModelContextProtocol/Binaries");
 
-    const legacyPackageScript = source("../scripts/package-prebuilt-github-release.ps1");
-    expect(legacyPackageScript).toContain("Repository Binaries are not release inputs");
-    expect(legacyPackageScript).not.toContain("Copy-Item -LiteralPath $sourcePlugin");
+    const prebuiltPackageScript = source("../scripts/package-prebuilt-github-release.sh");
+    expect(prebuiltPackageScript).toContain("ReleaseProvenance.json");
+    expect(prebuiltPackageScript).toContain("manifest.dll_sha256 === dllSha");
+    expect(prebuiltPackageScript).toContain("manifest.source_sha256 === sourceSha");
+    expect(prebuiltPackageScript).toContain('cp "$dll" "$modules" "$provenance"');
 
     const smokeScript = source("../scripts/test-release-asset.sh");
     expect(smokeScript).toContain("unzip -q \"$asset\"");

@@ -1,26 +1,16 @@
 param(
     [Parameter()]
     [ValidateNotNullOrEmpty()]
-    [string]$EngineRoot = 'C:\Program Files\Epic Games\UE_5.7',
-
-    [Parameter()]
-    [ValidateNotNullOrEmpty()]
     [string]$OutputFile
 )
 
 $ErrorActionPreference = 'Stop'
-
-Write-Warning 'Repository Binaries are not release inputs. Building a fresh GitHub package with UHT/UBT instead.'
-$buildScript = Join-Path $PSScriptRoot 'build-github-package.ps1'
-$buildArguments = @{
-    EngineRoot = $EngineRoot
-}
-
+$arguments = @((Join-Path $PSScriptRoot 'package-prebuilt-github-release.sh'))
 if (-not [string]::IsNullOrWhiteSpace($OutputFile)) {
-    $buildArguments.OutputFile = $OutputFile
+    $arguments += @('--output', $OutputFile)
 }
 
-& $buildScript @buildArguments
+& bash @arguments
 if ($LASTEXITCODE -ne 0) {
-    throw "Fresh GitHub package build failed with exit code $LASTEXITCODE"
+    throw "Prebuilt GitHub package failed with exit code $LASTEXITCODE"
 }

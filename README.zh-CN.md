@@ -2,48 +2,26 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-## 简介
+UnrealMCP 是一个 Win64 编辑器插件，将 Streamable HTTP MCP 服务直接嵌入 Unreal Engine 5.7。Codex 和其他本地 MCP 客户端可通过唯一的 `unreal` 工具检查并控制已打开的编辑器。
 
-UnrealMCP 是一个面向 Win64 的自包含 Unreal Engine 5.7 编辑器代码插件。它把 Streamable HTTP MCP 服务直接嵌入 Unreal Editor，让 Codex 和其他本地 MCP 客户端通过唯一的 MCP 工具 `unreal` 检查并控制已打开的编辑器。
+- 默认端点：`http://127.0.0.1:18777/mcp`
+- UObject、Unreal Python、控制台和 Blueprint 图操作均在游戏线程执行
+- 不需要网关、Node.js、npm 或独立运行时服务
+- 使用期间必须保持 Unreal Editor 已启动并打开目标工程
 
-插件默认监听 `http://127.0.0.1:18777/mcp`。UObject、Unreal Python 和控制台操作都会在游戏线程执行；产品运行时不需要网关 EXE、Node.js、npm、Python 第三方包或单独安装的服务。
+## 安装
 
-MCP 客户端连接期间，必须保持 Unreal Editor 已启动并打开目标工程。
-
-## 安装说明
-
-### For Human
-
-1. 从 [GitHub Releases](https://github.com/AvatarGanymede/ue5.7-mcp/releases) 下载命名为 `UnrealMCP-...-UE5.7-Win64-GitHub.zip` 的附件。不要把 GitHub 自动生成的 **Source code** 压缩包当作安装包。
-2. 关闭 Unreal Editor。升级时应完整替换已有的 `Plugins/ModelContextProtocol` 目录，不要把新文件合并覆盖到旧安装中。从 0.3.x 或更早版本升级时，删除旧的 `Plugins/UnrealMCP` 目录；不要同时保留两个插件标识。
-3. 将 ZIP 解压到 UE 工程根目录，也就是 `.uproject` 文件旁边。最终结构必须是：
-
-   ```text
-   <Project>/
-   ├─ <Project>.uproject
-   └─ Plugins/
-      └─ ModelContextProtocol/
-         ├─ ModelContextProtocol.uplugin
-         └─ Binaries/Win64/UnrealEditor-ModelContextProtocol.dll
-   ```
-
-4. 打开工程，在 **Edit → Plugins** 中启用 **MCP for Unreal Editor** 和 **Python Editor Script Plugin**，然后重启 Unreal Editor。如果安装器或源码变更直接在 `.uproject` 中启用插件，应明确填写 Win64 目标，避免 UE 5.7 报告工程引用的目标平台为空：
-
-   ```json
-   {
-     "Name": "ModelContextProtocol",
-     "Enabled": true,
-     "SupportedTargetPlatforms": ["Win64"]
-   }
-   ```
-
-5. 服务默认使用端口 `18777`。如果这个工程可能与另一个启用了 UnrealMCP 的工程同时打开，请在 **Edit → Project Settings → Plugins → MCP for Unreal Editor** 中为它选择一个唯一端口，然后重启 Unreal Editor。将对应的 MCP 端点添加到 Codex：
+1. 从 [GitHub Releases](https://github.com/AvatarGanymede/ue5.7-mcp/releases) 下载 `UnrealMCP-...-UE5.7-Win64-GitHub.zip`。不要使用 GitHub 自动生成的 **Source code** 压缩包。
+2. 关闭 Unreal Editor。将 ZIP 解压到工程的 `.uproject` 文件旁，确保插件位于 `Plugins/ModelContextProtocol`。
+3. 升级时完整替换该目录。从 0.3.x 或更早版本升级时，还需删除旧的 `Plugins/UnrealMCP` 目录。
+4. 在 **Edit → Plugins** 中启用 **MCP for Unreal Editor** 和 **Python Editor Script Plugin**，然后重启 Unreal Editor。
+5. 将服务添加到 Codex：
 
    ```bash
    codex mcp add unreal --url http://127.0.0.1:18777/mcp
    ```
 
-   也可以写入 `~/.codex/config.toml`，或可信工程内的 `.codex/config.toml`：
+   也可写入可信工程的 `.codex/config.toml`：
 
    ```toml
    [mcp_servers.unreal]
@@ -51,93 +29,32 @@ MCP 客户端连接期间，必须保持 Unreal Editor 已启动并打开目标�
    tool_timeout_sec = 3600
    ```
 
-   仍可在启动 Unreal Editor 前设置 `UE_MCP_PORT`，临时覆盖当前进程使用的端口；未设置环境变量时使用工程设置中的端口。
-
-6. 重启 Codex，确认 `unreal` 已连接，然后调用 `health` 动作。
-
-### For Agent
-
-为用户安装 UnrealMCP 时，按照以下流程执行：
-
-1. 查找 `.uproject` 文件以确定目标工程根目录。除非用户明确要求安装到引擎，否则使用工程级安装。
-2. 获取最新的命名发布附件 `UnrealMCP-*-UE5.7-Win64-GitHub.zip`，绝不能用 GitHub 自动生成的源码压缩包代替。
-3. 替换二进制文件前，让用户关闭 Unreal Editor。不要覆盖正在使用的插件。
-4. 解压前检查压缩包，确认包含 `Plugins/ModelContextProtocol/ModelContextProtocol.uplugin` 和 `Plugins/ModelContextProtocol/Binaries/Win64/UnrealEditor-ModelContextProtocol.dll`。
-5. 用压缩包中的插件目录完整替换 `<Project>/Plugins/ModelContextProtocol`。从 0.3.x 或更早版本迁移时，删除 `<Project>/Plugins/UnrealMCP`，避免新旧插件标识同时加载。保留其他插件和工程文件不变。如果需要直接编辑 `.uproject`，保留其中其他条目，并使用 `{ "Name": "ModelContextProtocol", "Enabled": true, "SupportedTargetPlatforms": ["Win64"] }` 作为本插件引用。
-6. 按当前 agent 自身的 MCP 配置规范，将名为 `unreal` 的 Streamable HTTP 服务注册到该 agent 的 **project scope MCP list**，端口应与 **Project Settings → Plugins → MCP for Unreal Editor** 中选择的端口一致（默认为 `18777`），例如 `http://127.0.0.1:18777/mcp`。不要注册到 user scope 或 global scope，也不要覆盖工程内其他 MCP 条目。如果该 agent 支持工具超时设置，将其设为 3600 秒。
-7. 告知用户启用 **MCP for Unreal Editor** 和 **Python Editor Script Plugin**，然后重启 Unreal Editor。
-8. Unreal Editor 重启后调用：
+6. 重启或重新连接 Codex，然后调用：
 
    ```json
    { "action": "health" }
    ```
 
-   就绪的服务应返回 `ok: true`、`is_game_thread: true` 和 `python_loaded: true`。
-9. 验证 `tools/list` 暴露了 `unreal`，并确认 host 将它显示为可直接调用的工具。如果 host 没有刷新 project MCP 工具，请重连或重启 host。需要从 Git Bash 排查时，可运行 `scripts/unreal-mcp.sh --list`；这个辅助脚本只用于避免手写 JSON-RPC 信封，并非产品运行时依赖。
+服务就绪时会返回 `ok: true`、`is_game_thread: true` 和 `python_loaded: true`。
 
-### 使用 Git Bash 从源码构建
-
-命名的 GitHub Release ZIP 是首选安装包。如果需要在 Windows 上从源码 checkout 本地构建，请在 Git Bash 中运行：
-
-```bash
-scripts/build-plugin.sh --engine-root 'C:/Program Files/Epic Games/UE_5.7'
-```
-
-脚本会打印 `artifacts/` 下新建的插件包目录。它会在所选 UE 安装中查找最新的 `Engine/Binaries/ThirdParty/DotNet/*/win-x64/dotnet.exe`，将该运行时放到 `PATH` 最前，设置 `DOTNET_ROOT`、关闭 multilevel lookup，再调用 `RunUAT.sh BuildPlugin`。这样可避免误选缺少 `Microsoft.WindowsDesktop.App 8.x` 的系统 `dotnet`。可用 `--output PATH` 指定一个尚不存在的输出目录；`UE_DOTNET_ROOT` 仅用于诊断时覆盖自动探测。
+> 如果直接在 `.uproject` 中启用插件，请在插件条目中加入 `"SupportedTargetPlatforms": ["Win64"]`。
 
 ## 配置
 
-### 配置服务端口
+服务默认监听 `127.0.0.1:18777`。如需同时打开多个 Unreal 工程，请在 **Edit → Project Settings → Plugins → MCP for Unreal Editor** 中为每个工程分配不同端口，重启 Unreal Editor，并同步修改对应的 MCP URL。
 
-MCP 服务默认监听 `127.0.0.1:18777`。如果可能同时打开多个 Unreal 工程，需要为每个工程设置不同的端口：
+在启动 Unreal Editor 前设置 `UE_MCP_PORT`，可临时覆盖工程端口。
 
-1. 在 Unreal Editor 中打开目标工程。
-2. 进入 **Edit → Project Settings → Plugins → MCP for Unreal Editor**。
-3. 在 **Server** 分类下，将 **Port** 设置为 `1` 到 `65535` 之间尚未被占用的端口，例如 `18778`。
-4. 重启 Unreal Editor。编辑器重启后，HTTP 监听器才会使用新端口。
-5. 将当前工程的 MCP 客户端 URL 修改为相同端口，然后重新连接或重启客户端。
+## 使用
 
-例如，工程设置的端口为 `18778` 时，Codex 的工程级配置应为：
-
-```toml
-[mcp_servers.unreal]
-url = "http://127.0.0.1:18778/mcp"
-tool_timeout_sec = 3600
-```
-
-如果同时打开两个工程，可以让工程 A 保持使用 `18777`，工程 B 使用 `18778`。两个工程的 MCP 客户端 URL 必须分别与各自的工程设置保持一致。
-
-自动化测试或临时启动时，可以在启动 Unreal Editor 前设置 `UE_MCP_PORT`。有效的 `UE_MCP_PORT` 只会覆盖当前编辑器进程的工程设置；移除该环境变量后，下次启动将恢复使用工程中配置的端口。
-
-重启后调用 `health` 动作，并检查返回结果中的 `endpoint` 字段，即可确认当前实际使用的端口：
-
-```json
-{ "action": "health" }
-```
-
-## MCP 提供的工具集
-
-服务只暴露一个名为 `unreal` 的 MCP 工具，通过 `action` 字段选择四类操作：
+服务只暴露一个名为 `unreal` 的 MCP 工具，包含四种动作：
 
 | Action | 用途 |
 |---|---|
-| `health` | 检查服务状态、引擎版本、游戏线程调度、Python 可用性、传输方式和端点。 |
-| `discover` | 搜索能力域、可运行的 UE 5.7 API 起点，以及已发现插件的挂载状态。 |
-| `execute` | 执行最多 100 条有序 Python、控制台、原生 Blueprint 图或异步非阻塞等待命令。 |
-| `task` | 查询、列出或取消通过 `execute` 提交的异步任务。 |
-
-检查连接：
-
-```json
-{ "action": "health" }
-```
-
-如果 MCP host 尚未直接显示 `unreal`，可以从 Git Bash 用仓库辅助脚本调用同一端点：
-
-```bash
-scripts/unreal-mcp.sh '{"action":"health"}'
-scripts/unreal-mcp.sh --list
-```
+| `health` | 检查服务、引擎、Python、线程和端点状态。 |
+| `discover` | 查找支持的工作流、UE API 和插件挂载状态。 |
+| `execute` | 执行有序的 Python、控制台、Blueprint 图或等待命令。 |
+| `task` | 查询、列出或取消异步任务。 |
 
 选择 UE API 前先发现相关工作流：
 
@@ -149,81 +66,56 @@ scripts/unreal-mcp.sh --list
 }
 ```
 
-Blueprint 资产/组件/默认值编辑与可见 K2 Event Graph 编写是两种不同能力。资产、变量、组件和类默认值继续使用 Python 与 `BlueprintEditorLibrary`；可见节点和连线使用 `kind: "blueprint_graph"`。这个 UE 5.7 原生后端遵循 UE 5.8 `BlueprintGraphEditor`/`BlueprintGraphPin` 的设计，使用 Blueprint 节点生成器和 K2 Schema，不依赖不完整的 Python Wrapper。
-
-```json
-{
-  "action": "execute",
-  "transaction": true,
-  "commands": [
-    {
-      "kind": "blueprint_graph",
-      "operation": "add_function_call",
-      "blueprint_path": "/Game/Blueprints/BP_Example.BP_Example",
-      "function_path": "/Script/Engine.KismetSystemLibrary.PrintString",
-      "x": 320,
-      "y": 0
-    },
-    {
-      "kind": "blueprint_graph",
-      "operation": "compile",
-      "blueprint_path": "/Game/Blueprints/BP_Example.BP_Example",
-      "save": true
-    }
-  ]
-}
-```
-
-应先调用 `operation: "inspect"`；返回的每个节点和引脚都包含 GUID，以及引脚方向、名称和索引。`connect`、`disconnect`、`set_pin_default` 可直接使用引脚 GUID，也可使用 UE 5.8 风格的“节点 + 方向 + 名称 + 索引”引用，以容忍常见的引脚索引漂移。当前覆盖检查、标准/自定义事件、函数调用、成员变量 Get/Set、连线、默认值、移动、注释、删除、编译和保存；暂不支持 Timeline/Track 编写。
-
-在游戏线程执行有序批处理：
+执行有序批处理：
 
 ```json
 {
   "action": "execute",
   "run": "sync",
   "transaction": true,
-  "continue_on_error": false,
   "commands": [
     {
       "kind": "python",
       "mode": "eval",
-      "label": "engine-version",
       "code": "unreal.SystemLibrary.get_engine_version()"
     },
     {
       "kind": "console",
-      "label": "show-fps",
       "command": "stat fps"
     }
   ]
 }
 ```
 
-长耗时操作可设置 `"run": "async"`，响应会返回 `task_id`。查询方式：
+长耗时批处理可使用 `"run": "async"`，再查询返回的 `task_id`：
 
 ```json
 { "action": "task", "command": "get", "task_id": "<uuid>" }
 ```
 
-必须观察后续 Tick 的运行时断言可以使用非阻塞等待。等待命令要求 `run=async`；同步调用会被拒绝，不会用 sleep 阻塞游戏线程：
+Blueprint 资产、变量、组件和类默认值使用 Python 与 `BlueprintEditorLibrary`；可见 K2 节点和连线使用 `kind: "blueprint_graph"`。建议先执行 `operation: "inspect"` 获取稳定的节点和引脚引用。当前不支持 Timeline/Track 编写。
 
-```json
-{
-  "action": "execute",
-  "run": "async",
-  "transaction": false,
-  "commands": [
-    { "kind": "python", "mode": "exec", "code": "world = unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_game_world(); unreal.GameplayStatics.get_player_pawn(world, 0).jump()" },
-    { "kind": "wait", "frames": 1, "label": "next-tick" },
-    { "kind": "wait", "seconds": 0.08, "label": "jump-window" },
-    { "kind": "python", "mode": "eval", "code": "(lambda pawn: (pawn.get_velocity().z, pawn.get_character_movement().is_falling()))(unreal.GameplayStatics.get_player_pawn(unreal.get_editor_subsystem(unreal.UnrealEditorSubsystem).get_game_world(), 0))" }
-  ]
-}
+等待命令只能用于异步模式，不会阻塞游戏线程。事务会创建 Undo 记录，但不具备原子性；失败、超时或取消不会自动回滚先前的修改。
+
+需要从 Git Bash 直接排查时：
+
+```bash
+scripts/unreal-mcp.sh '{"action":"health"}'
+scripts/unreal-mcp.sh --list
 ```
 
-异步批处理每个游戏线程 tick 执行一条命令。300 秒墙钟时间限制和协作式取消只在命令之间检查；正在执行的 Python 或控制台命令不会被中断。`transaction: true` 会为每条 Python 和控制台命令分别记录 Undo；`wait` 不会添加 Undo。服务不会假设 Python `eval` 是只读操作，因为表达式仍然可以调用会修改 UObject 的方法。事务不具备原子性，Python 也可能在抛异常前已经修改 UObject。失败、超时或取消不会自动回滚；应检查 `partial_changes_possible`、`commands_completed`、`commands_succeeded` 和 `failed_command_index`，必要时进行幂等清理。Python 失败的完整 traceback 会同时出现在命令级 `result` 和 `error` 中。
+## 从源码构建
 
-服务端会依据发布的 JSON Schema 校验工具参数，并强制执行固定安全上限：请求和响应各 4 MiB、HTTP 待处理队列 64 个请求、发现查询 4096 个字符、每批 100 条命令、每个 MCP 会话或客户端 128 个任务、全局 1024 个任务。异步任务的 list/get/cancel 按 `Mcp-Session-Id` 隔离；没有 MCP 会话头时使用客户端身份回退值。
+在 Windows 的 Git Bash 中运行：
 
-能力目录覆盖编辑器与资产操作、Blueprint 资产/默认值编辑与原生 K2 图编写、AI 与导航、动画、自动化、配置、对话、Data Registry、Dataflow、Game Features、Gameplay Tags 与 GAS、Niagara、PCG、物理、插件、语义搜索、Slate、StateTree、UMG、World Conditions，以及 UnLua 等工程专用反射 API。对 PIE、碰撞、当前动画、Player Pawn、Viewport Widget 和 Blueprint 图等高频易错调用，目录会返回可运行 recipe。按插件名称查询时，还会报告已发现的启用或禁用插件及其 `enabled`、`mounted`、`can_contain_content`、`content_dir` 和 `mounted_asset_path`，用来诊断 Asset Registry 在插件内容挂载前无法看到的资产；服务不会递归索引禁用插件目录中的文件。具体能力是否可用取决于相应的 UE 5.7 或工程插件是否已经启用。
+```bash
+scripts/build-plugin.sh --engine-root 'C:/Program Files/Epic Games/UE_5.7'
+```
+
+插件包会输出到 `artifacts/`。可用 `--output PATH` 指定一个新的输出目录。
+
+## 更多资料
+
+- [架构](docs/architecture.md)
+- [能力覆盖](docs/capability-coverage.md)
+- [工具精简设计](docs/tool-minimization.md)
