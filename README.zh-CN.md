@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+![Agent-MCP-Engine 数据沟通协议与执行链路](imgs/agent-mcp-engine-protocol.zh-CN.drawio.png)
+
 UnrealMCP 是一个 Win64 编辑器插件，将 Streamable HTTP MCP 服务直接嵌入 Unreal Engine 5.7。Codex 和其他本地 MCP 客户端可通过唯一的 `unreal` 工具检查并控制已打开的编辑器。
 
 - 默认端点：`http://127.0.0.1:18777/mcp`

@@ -2,6 +2,8 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
+![Agent-MCP-Engine data protocol and execution path](imgs/agent-mcp-engine-protocol.en.drawio.png)
+
 UnrealMCP is a Win64 editor plugin that embeds a Streamable HTTP MCP server in Unreal Engine 5.7. Codex and other local MCP clients can inspect and control the open editor through one tool: `unreal`.
 
 - Default endpoint: `http://127.0.0.1:18777/mcp`
